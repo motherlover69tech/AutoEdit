@@ -127,9 +127,11 @@ MySQL integration commands:
 ./scripts/test-mysql-unraid.sh
 ```
 
-Latest MySQL result: `1 passed in 1.58s`.
+Latest temporary-dev-MySQL result: `1 passed in 1.58s`.
 
-Latest full suite with `AUTOEDIT_MYSQL_TEST_URL` set: `18 passed in 1.77s`.
+Latest full suite with temporary-dev-MySQL `AUTOEDIT_MYSQL_TEST_URL` set: `18 passed in 1.77s`.
+
+Canonical deployment DB target is Peter's existing MySQL server. When credentials are available, re-run the MySQL integration gate against the existing server and record the result here.
 
 ## Stage 3.1 initial test plan
 
@@ -160,9 +162,9 @@ Current coverage:
 - `tests/test_project_paths.py` verifies the spec directory tree and path-traversal/invalid-id rejection.
 - `tests/test_projects_api.py` verifies `/health`, `POST /projects`, `GET /projects/:id`, manifest JSON, project skeleton creation, invalid FPS rejection, and missing-project 404.
 
-Remaining Stage 3.1 gate:
+Remaining deployment DB gate:
 
-- Complete: real MySQL 8 verification passes through the Unraid dev DB (`autoedit-mysql`).
+- Pending: verify against Peter's existing MySQL server. The temporary Unraid `autoedit-mysql` container only proved MySQL compatibility and is not the canonical AUTOEDIT DB.
 
 ## Rule for future AI sessions
 

@@ -6,10 +6,19 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ## Current next job
 
+### Job DB-0 — Existing MySQL wiring
+
+- **Status:** pending — Peter will provide/create DB credentials on the existing MySQL server.
+- **Depends on:** Stage 3.1 code implementation
+- **Spec stage:** 3.1 deployment verification / Section 2.2 DB contract
+- **Goal:** verify AUTOEDIT migrations and project API against the existing MySQL server, not the temporary dev container.
+- **Required tests:** `tests/test_mysql_integration.py` passes with existing-server `AUTOEDIT_MYSQL_TEST_URL`; full suite passes with that URL set.
+- **Planning doc:** `docs/plans/EXISTING_MYSQL_REQUIREMENTS.md`
+
 ### Job 7.0 — Auth gate + reverse proxy
 
 - **Status:** pending
-- **Depends on:** 3.1
+- **Depends on:** 3.1 + DB-0 for deployment DB verification
 - **Spec stage:** 7.0
 - **Goal:** require TLS/session auth before any public exposure; protect routes, add login/session handling, rate limit auth/upload, lock CORS to `PUBLIC_DOMAIN`.
 - **Required tests:** `/health` public; protected API routes blocked without session; login creates httpOnly session; brute-force/rate-limit behavior covered; reviewer display name persisted for later notes.
@@ -17,7 +26,7 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ### Job 3.1 — Project + DB bootstrap
 
-- **Status:** done
+- **Status:** implemented; deployment DB verification pending through DB-0
 - **Depends on:** none
 - **Spec stage:** 3.1
 - **Goal:** create the first backend foundation: database schema, project creation endpoint, manifest endpoint, project folder skeleton, and `project.json`.
@@ -30,8 +39,9 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 | Job | Stage | Status | Depends on | Output |
 | --- | --- | --- | --- | --- |
-| 3.1 | Project + DB bootstrap | done | none | schema, `POST /projects`, `GET /projects/:id`, project skeleton; MySQL gate passed |
-| 7.0 | Auth gate + reverse proxy | pending | 3.1 | TLS proxy, auth/session, rate limits, CORS |
+| DB-0 | Existing MySQL wiring | pending | 3.1 code | verify against Peter's existing MySQL server |
+| 3.1 | Project + DB bootstrap | implemented | none | schema, `POST /projects`, `GET /projects/:id`, project skeleton; temp MySQL gate passed |
+| 7.0 | Auth gate + reverse proxy | pending | 3.1, DB-0 | TLS proxy, auth/session, rate limits, CORS |
 | 3.2 | Chunked resumable upload | pending | 3.1 | resumable chunk upload + SHA verification |
 | 3.3 | Probe & channel mapping | pending | 3.2 | ffprobe metadata, angle rows, speaker channel mapping |
 | 3.4 | Channel extraction + audio sync | pending | 3.3 | speaker WAVs, cross-correlation sync offsets |
