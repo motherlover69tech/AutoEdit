@@ -117,21 +117,33 @@ env -u VIRTUAL_ENV uv run pytest -q
 
 Latest local result without MySQL URL: `17 passed, 1 skipped`.
 
-MySQL integration commands:
+Canonical existing-MySQL integration commands:
 
 ```bash
-# terminal 1: open tunnel to Unraid-local MySQL
-./scripts/mysql-tunnel.sh
+# Preferred: provide DB_* variables directly so special characters in DB_PASSWORD
+# do not need URL encoding.
+DB_HOST=192.168.50.50 \
+DB_PORT=3306 \
+DB_NAME=autoedit \
+DB_USER=autoedit \
+DB_PASSWORD='***' \
+  env -u VIRTUAL_ENV uv run pytest tests/test_mysql_integration.py -q
 
-# terminal 2: run MySQL gate using remote .env credentials
-./scripts/test-mysql-unraid.sh
+DB_HOST=192.168.50.50 \
+DB_PORT=3306 \
+DB_NAME=autoedit \
+DB_USER=autoedit \
+DB_PASSWORD='***' \
+  env -u VIRTUAL_ENV uv run pytest -q
 ```
+
+Latest canonical existing-MySQL result: `18 passed in 1.82s`.
 
 Latest temporary-dev-MySQL result: `1 passed in 1.58s`.
 
 Latest full suite with temporary-dev-MySQL `AUTOEDIT_MYSQL_TEST_URL` set: `18 passed in 1.77s`.
 
-Canonical deployment DB target is Peter's existing MySQL server. When credentials are available, re-run the MySQL integration gate against the existing server and record the result here.
+The temporary Unraid `autoedit-mysql` container only proved MySQL compatibility and is not the canonical AUTOEDIT DB.
 
 ## Stage 3.1 initial test plan
 
@@ -162,9 +174,9 @@ Current coverage:
 - `tests/test_project_paths.py` verifies the spec directory tree and path-traversal/invalid-id rejection.
 - `tests/test_projects_api.py` verifies `/health`, `POST /projects`, `GET /projects/:id`, manifest JSON, project skeleton creation, invalid FPS rejection, and missing-project 404.
 
-Remaining deployment DB gate:
+Deployment DB gate:
 
-- Pending: verify against Peter's existing MySQL server. The temporary Unraid `autoedit-mysql` container only proved MySQL compatibility and is not the canonical AUTOEDIT DB.
+- Complete: verified against Peter's existing MySQL server (`192.168.50.50:3306`, database `autoedit`, user `autoedit`, password not recorded). Full suite with DB enabled passed: `18 passed in 1.82s`.
 
 ## Rule for future AI sessions
 

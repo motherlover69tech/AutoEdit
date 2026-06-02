@@ -21,7 +21,7 @@ Read those before implementing.
 ## Current implementation state
 
 - Backend stack chosen: Python 3.12 + FastAPI + SQLAlchemy Core + pytest, managed with `uv`.
-- Stage 3.1 code is implemented and passes local tests.
+- Stage 3.1 code is implemented and deployment-DB verified.
   - DB schema tables for spec Section 2.2.
   - Idempotent `run_migrations(engine)` helper using SQLAlchemy metadata.
   - `POST /projects` and `GET /projects/:id`.
@@ -29,22 +29,18 @@ Read those before implementing.
   - Atomic `project.json` manifest write.
   - Strict invalid-FPS validation returning HTTP 400.
   - Local SQLite-backed tests pass.
-  - MySQL compatibility was proven against a temporary Unraid dev container.
+  - MySQL compatibility was first proven against a temporary Unraid dev container.
+  - Peter's existing MySQL server at `192.168.50.50:3306`, database `autoedit`, user `autoedit`, has now passed the canonical deployment DB gate. Password is intentionally not recorded.
 - **Canonical DB decision:** use Peter's existing MySQL server, not the temporary `autoedit-mysql` container.
   - Required creds/details are documented in `docs/plans/EXISTING_MYSQL_REQUIREMENTS.md`.
-  - Stage 3.1 should not be considered production/deployment-gated until the existing MySQL server is verified with `tests/test_mysql_integration.py`.
+  - Existing MySQL verification command used direct `DB_*` env vars to avoid URL-encoding issues with special-character passwords.
+  - Latest canonical DB result: `DB_HOST=192.168.50.50 DB_PORT=3306 DB_NAME=autoedit DB_USER=autoedit DB_PASSWORD=*** env -u VIRTUAL_ENV uv run pytest -q` → `18 passed in 1.82s`.
   - Temporary dev DB: `/mnt/user/appdata/autoedit-mysql/compose.yaml`, container `autoedit-mysql`, bound to Unraid `127.0.0.1:3307` only. It is currently stopped and should not be used as the canonical DB.
 - No frontend exists yet.
 
 ## Immediate next job
 
-First verify Stage 3.1 against Peter's existing MySQL server:
-
-- Get/create `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` for the existing MySQL server.
-- Run `tests/test_mysql_integration.py` against that server.
-- Update docs/backlog with the verified connection target.
-
-Then proceed to **Stage 7.0 — Auth gate + reverse proxy** before upload/media exposure.
+Proceed to **Stage 7.0 — Auth gate + reverse proxy** before upload/media exposure.
 
 ## Key architecture constraints
 

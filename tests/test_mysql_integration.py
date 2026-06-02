@@ -3,17 +3,38 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import URL, create_engine, inspect
 from sqlalchemy.pool import NullPool
 
 from autoedit.api import create_app
 from autoedit.db.migrate import run_migrations
 
 
-MYSQL_TEST_URL = os.getenv("AUTOEDIT_MYSQL_TEST_URL")
+def _mysql_test_url() -> URL | str | None:
+    if explicit_url := os.getenv("AUTOEDIT_MYSQL_TEST_URL"):
+        return explicit_url
+
+    required = ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD"]
+    if not all(os.getenv(name) for name in required):
+        return None
+
+    return URL.create(
+        "mysql+pymysql",
+        username=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        host=os.environ["DB_HOST"],
+        port=int(os.environ["DB_PORT"]),
+        database=os.environ["DB_NAME"],
+    )
 
 
-@pytest.mark.skipif(not MYSQL_TEST_URL, reason="AUTOEDIT_MYSQL_TEST_URL is not set")
+MYSQL_TEST_URL = _mysql_test_url()
+
+
+@pytest.mark.skipif(
+    not MYSQL_TEST_URL,
+    reason="set AUTOEDIT_MYSQL_TEST_URL or DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD",
+)
 def test_stage_3_1_flow_against_mysql(tmp_path: Path):
     engine = create_engine(MYSQL_TEST_URL, poolclass=NullPool)
 

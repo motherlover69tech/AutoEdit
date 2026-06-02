@@ -36,19 +36,31 @@ Least-privilege note from the spec: app runtime should ideally only need `SELECT
 
 ## Verification command
 
-Once creds are available, run:
+Preferred verification uses direct `DB_*` environment variables so special characters in `DB_PASSWORD` do not need URL encoding:
 
 ```bash
-AUTOEDIT_MYSQL_TEST_URL='mysql+pymysql://USER:PASSWORD@HOST:PORT/DB_NAME' \
+DB_HOST=192.168.50.50 \
+DB_PORT=3306 \
+DB_NAME=autoedit \
+DB_USER=autoedit \
+DB_PASSWORD='***' \
   env -u VIRTUAL_ENV uv run pytest tests/test_mysql_integration.py -q
 ```
 
 Then run full suite:
 
 ```bash
-AUTOEDIT_MYSQL_TEST_URL='mysql+pymysql://USER:PASSWORD@HOST:PORT/DB_NAME' \
+DB_HOST=192.168.50.50 \
+DB_PORT=3306 \
+DB_NAME=autoedit \
+DB_USER=autoedit \
+DB_PASSWORD='***' \
   env -u VIRTUAL_ENV uv run pytest -q
 ```
+
+Latest canonical existing-server verification: `18 passed in 1.82s`.
+
+`AUTOEDIT_MYSQL_TEST_URL` is still supported, but passwords containing characters like `@` must be URL-encoded if that form is used.
 
 ## Temporary dev DB status
 

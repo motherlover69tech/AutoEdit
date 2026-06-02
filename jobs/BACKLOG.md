@@ -8,11 +8,13 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ### Job DB-0 — Existing MySQL wiring
 
-- **Status:** pending — Peter will provide/create DB credentials on the existing MySQL server.
+- **Status:** done
 - **Depends on:** Stage 3.1 code implementation
 - **Spec stage:** 3.1 deployment verification / Section 2.2 DB contract
 - **Goal:** verify AUTOEDIT migrations and project API against the existing MySQL server, not the temporary dev container.
-- **Required tests:** `tests/test_mysql_integration.py` passes with existing-server `AUTOEDIT_MYSQL_TEST_URL`; full suite passes with that URL set.
+- **Required tests:** `tests/test_mysql_integration.py` passes against existing-server DB; full suite passes with existing-server DB enabled.
+- **Verified target:** `192.168.50.50:3306`, database `autoedit`, user `autoedit`; password intentionally not recorded.
+- **Latest result:** `DB_HOST=192.168.50.50 DB_PORT=3306 DB_NAME=autoedit DB_USER=autoedit DB_PASSWORD=*** env -u VIRTUAL_ENV uv run pytest -q` → `18 passed in 1.82s`.
 - **Planning doc:** `docs/plans/EXISTING_MYSQL_REQUIREMENTS.md`
 
 ### Job 7.0 — Auth gate + reverse proxy
@@ -26,21 +28,22 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ### Job 3.1 — Project + DB bootstrap
 
-- **Status:** implemented; deployment DB verification pending through DB-0
+- **Status:** done
 - **Depends on:** none
 - **Spec stage:** 3.1
 - **Goal:** create the first backend foundation: database schema, project creation endpoint, manifest endpoint, project folder skeleton, and `project.json`.
 - **Required tests:** migration idempotency, project creation, invalid FPS rejected, `project.json` matches DB.
 - **Planning doc:** `docs/plans/stage-3.1-project-db-bootstrap.md`
 - **Latest local test:** `env -u VIRTUAL_ENV uv run pytest -q` → `17 passed, 1 skipped`.
-- **Latest MySQL gate:** `./scripts/mysql-tunnel.sh` + `./scripts/test-mysql-unraid.sh` → `1 passed`; full suite with `AUTOEDIT_MYSQL_TEST_URL` → `18 passed`.
+- **Latest canonical MySQL gate:** existing MySQL server `192.168.50.50:3306` with `DB_*` env vars → `18 passed`.
+- **Historical temporary MySQL gate:** `./scripts/mysql-tunnel.sh` + `./scripts/test-mysql-unraid.sh` → `1 passed`; full suite with `AUTOEDIT_MYSQL_TEST_URL` → `18 passed`.
 
 ## Stage backlog
 
 | Job | Stage | Status | Depends on | Output |
 | --- | --- | --- | --- | --- |
-| DB-0 | Existing MySQL wiring | pending | 3.1 code | verify against Peter's existing MySQL server |
-| 3.1 | Project + DB bootstrap | implemented | none | schema, `POST /projects`, `GET /projects/:id`, project skeleton; temp MySQL gate passed |
+| DB-0 | Existing MySQL wiring | done | 3.1 code | verified against Peter's existing MySQL server |
+| 3.1 | Project + DB bootstrap | done | none | schema, `POST /projects`, `GET /projects/:id`, project skeleton; canonical MySQL gate passed |
 | 7.0 | Auth gate + reverse proxy | pending | 3.1, DB-0 | TLS proxy, auth/session, rate limits, CORS |
 | 3.2 | Chunked resumable upload | pending | 3.1 | resumable chunk upload + SHA verification |
 | 3.3 | Probe & channel mapping | pending | 3.2 | ffprobe metadata, angle rows, speaker channel mapping |
