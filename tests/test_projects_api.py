@@ -18,7 +18,7 @@ def client(tmp_path: Path):
         poolclass=StaticPool,
     )
     run_migrations(engine)
-    app = create_app(engine=engine, data_root=tmp_path)
+    app = create_app(engine=engine, data_root=tmp_path, auth_enabled=False)
     return TestClient(app), tmp_path
 
 

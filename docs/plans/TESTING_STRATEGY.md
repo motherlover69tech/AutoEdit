@@ -117,6 +117,8 @@ env -u VIRTUAL_ENV uv run pytest -q
 
 Latest local result without MySQL URL: `17 passed, 1 skipped`.
 
+Latest local result after Stage 7.0 backend auth gate: `24 passed, 1 skipped`.
+
 Canonical existing-MySQL integration commands:
 
 ```bash
@@ -137,7 +139,18 @@ DB_PASSWORD='***' \
   env -u VIRTUAL_ENV uv run pytest -q
 ```
 
-Latest canonical existing-MySQL result: `18 passed in 1.82s`.
+Latest canonical existing-MySQL result after Stage 7.0 backend auth gate: `25 passed in 1.90s`.
+
+Security tests added in `tests/test_auth_gate.py` cover:
+
+- `/health` public while auth is enabled.
+- ACME challenge path bypasses auth.
+- Project routes require a session.
+- Login sets an httpOnly session cookie.
+- Authenticated project creation works.
+- `GET /auth/me` returns reviewer display name from the session.
+- Failed login lockout returns `429` after threshold.
+- Unexpected `Origin` returns `403`; configured `PUBLIC_DOMAIN` origin passes.
 
 Latest temporary-dev-MySQL result: `1 passed in 1.58s`.
 

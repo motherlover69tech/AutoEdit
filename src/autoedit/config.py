@@ -12,6 +12,12 @@ class Settings(BaseSettings):
 
     public_domain: str | None = Field(default=None, alias="PUBLIC_DOMAIN")
     session_secret: str | None = Field(default=None, alias="SESSION_SECRET")
+    operator_password: str | None = Field(default=None, alias="OPERATOR_PASSWORD")
+    auth_enabled: bool = Field(default=True, alias="AUTH_ENABLED")
+    session_cookie_name: str = Field(default="autoedit_session", alias="SESSION_COOKIE_NAME")
+    session_cookie_secure: bool = Field(default=True, alias="SESSION_COOKIE_SECURE")
+    login_max_failures: int = Field(default=5, alias="LOGIN_MAX_FAILURES")
+    login_lockout_seconds: int = Field(default=300, alias="LOGIN_LOCKOUT_SECONDS")
     data_root: Path = Field(default=Path("/mnt/user/automulticam"), alias="DATA_ROOT")
 
     db_host: str = Field(default="localhost", alias="DB_HOST")

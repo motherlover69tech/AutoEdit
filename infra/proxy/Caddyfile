@@ -1,0 +1,25 @@
+{
+	# Set ACME_EMAIL in deployment if you want Let's Encrypt account notices.
+	email {$ACME_EMAIL}
+}
+
+http://{$PUBLIC_DOMAIN} {
+	redir https://{$PUBLIC_DOMAIN}{uri} permanent
+}
+
+https://{$PUBLIC_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer-when-downgrade
+		X-Frame-Options DENY
+	}
+
+	# ACME challenge handling is owned by Caddy. Do not serve DATA_ROOT here.
+	reverse_proxy {$APP_UPSTREAM:http://app:8000} {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-For {remote_host}
+	}
+}

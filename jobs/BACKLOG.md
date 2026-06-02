@@ -19,11 +19,13 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ### Job 7.0 — Auth gate + reverse proxy
 
-- **Status:** in_progress — implementation plan created; backend auth tests/implementation next, TLS proxy deployment gate still pending.
+- **Status:** in_progress — backend auth/session/rate-limit/origin gate implemented and tested; TLS proxy deployment/manual gate still pending.
 - **Depends on:** 3.1 + DB-0 for deployment DB verification
 - **Spec stage:** 7.0
 - **Goal:** require TLS/session auth before any public exposure; protect routes, add login/session handling, rate limit auth/upload, lock CORS to `PUBLIC_DOMAIN`.
 - **Required tests:** `/health` public; protected API routes blocked without session; login creates httpOnly session; brute-force/rate-limit behavior covered; reviewer display name persisted for later notes.
+- **Latest backend result:** `env -u VIRTUAL_ENV uv run pytest -q` → `24 passed, 1 skipped`; existing-MySQL-enabled suite → `25 passed`.
+- **Remaining manual gate:** deploy Caddy/reverse proxy for the real `PUBLIC_DOMAIN`; verify TLS cert, HTTP→HTTPS redirect, `401` on protected routes without a session, and no direct `/data` exposure.
 - **Planning doc:** `docs/plans/stage-7.0-auth-gate-reverse-proxy.md`
 
 ### Job 3.1 — Project + DB bootstrap
@@ -44,7 +46,7 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 | --- | --- | --- | --- | --- |
 | DB-0 | Existing MySQL wiring | done | 3.1 code | verified against Peter's existing MySQL server |
 | 3.1 | Project + DB bootstrap | done | none | schema, `POST /projects`, `GET /projects/:id`, project skeleton; canonical MySQL gate passed |
-| 7.0 | Auth gate + reverse proxy | pending | 3.1, DB-0 | TLS proxy, auth/session, rate limits, CORS |
+| 7.0 | Auth gate + reverse proxy | in_progress | 3.1, DB-0 | backend auth/session/rate limits/origin checks pass; TLS proxy manual gate pending |
 | 3.2 | Chunked resumable upload | pending | 3.1 | resumable chunk upload + SHA verification |
 | 3.3 | Probe & channel mapping | pending | 3.2 | ffprobe metadata, angle rows, speaker channel mapping |
 | 3.4 | Channel extraction + audio sync | pending | 3.3 | speaker WAVs, cross-correlation sync offsets |

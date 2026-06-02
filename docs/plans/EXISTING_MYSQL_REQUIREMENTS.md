@@ -58,7 +58,7 @@ DB_PASSWORD='***' \
   env -u VIRTUAL_ENV uv run pytest -q
 ```
 
-Latest canonical existing-server verification: `18 passed in 1.82s`.
+Latest canonical existing-server verification after Stage 7.0 backend auth gate: `25 passed in 1.90s`.
 
 `AUTOEDIT_MYSQL_TEST_URL` is still supported, but passwords containing characters like `@` must be URL-encoded if that form is used.
 

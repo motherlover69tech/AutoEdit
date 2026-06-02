@@ -45,7 +45,7 @@ def test_stage_3_1_flow_against_mysql(tmp_path: Path):
     assert "projects" in inspector.get_table_names()
     assert "jobs" in inspector.get_table_names()
 
-    app = create_app(engine=engine, data_root=tmp_path)
+    app = create_app(engine=engine, data_root=tmp_path, auth_enabled=False)
     with TestClient(app) as client:
         response = client.post(
             "/projects",

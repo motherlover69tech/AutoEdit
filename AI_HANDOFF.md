@@ -36,11 +36,21 @@ Read those before implementing.
   - Existing MySQL verification command used direct `DB_*` env vars to avoid URL-encoding issues with special-character passwords.
   - Latest canonical DB result: `DB_HOST=192.168.50.50 DB_PORT=3306 DB_NAME=autoedit DB_USER=autoedit DB_PASSWORD=*** env -u VIRTUAL_ENV uv run pytest -q` → `18 passed in 1.82s`.
   - Temporary dev DB: `/mnt/user/appdata/autoedit-mysql/compose.yaml`, container `autoedit-mysql`, bound to Unraid `127.0.0.1:3307` only. It is currently stopped and should not be used as the canonical DB.
+- Stage 7.0 backend auth gate is implemented and tested locally:
+  - Signed httpOnly session cookie login at `POST /auth/login`.
+  - `GET /auth/me` returns reviewer display name from the session.
+  - All non-public routes require a session when auth is enabled.
+  - Public exceptions: `/health`, `POST /auth/login`, and `/.well-known/acme-challenge/...`.
+  - Brute-force login lockout and `PUBLIC_DOMAIN` origin checks are covered by tests.
+  - Caddy reverse-proxy template exists in `infra/proxy/`.
+  - Remaining Stage 7.0 gate: deploy/verify TLS cert provisioning + HTTP→HTTPS redirect on the real public domain.
 - No frontend exists yet.
 
 ## Immediate next job
 
-Proceed with **Stage 7.0 — Auth gate + reverse proxy** before upload/media exposure. The plan is saved at `docs/plans/stage-7.0-auth-gate-reverse-proxy.md`; next implementation step is backend auth tests first.
+Finish **Stage 7.0 — Auth gate + reverse proxy** by deploying/verifying the proxy/TLS manual gate on the real public domain. Do not start upload/media exposure until this is done.
+
+If TLS/public-domain details are not available, the next code job is Stage 3.2 chunked resumable upload, but keep all upload/media routes behind the auth middleware added in Stage 7.0.
 
 ## Key architecture constraints
 
