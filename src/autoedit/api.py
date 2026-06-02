@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from secrets import compare_digest
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -17,6 +17,11 @@ from autoedit.config import Settings
 from autoedit.db.migrate import run_migrations
 from autoedit.projects import create_project as create_project_record
 from autoedit.projects import get_project as get_project_record
+from autoedit.uploads import UploadError, UploadNotFoundError
+from autoedit.uploads import complete_upload as complete_upload_record
+from autoedit.uploads import create_upload as create_upload_record
+from autoedit.uploads import get_upload_status as get_upload_status_record
+from autoedit.uploads import write_chunk as write_upload_chunk
 
 
 class ProjectCreate(BaseModel):
@@ -32,6 +37,23 @@ class LoginRequest(BaseModel):
 
     password: Annotated[str, StringConstraints(min_length=1)]
     display_name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+
+
+class UploadCreate(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    filename: str
+    label: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)]
+    role: Literal["cam_left", "cam_right", "wide", "other"]
+    total_bytes: int = Field(gt=0, strict=True)
+    total_chunks: int = Field(gt=0, strict=True)
+
+
+class UploadComplete(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-fA-F]{64}$")]
+    total_bytes: int = Field(gt=0, strict=True)
 
 
 def _public_origin(public_domain: str | None) -> str | None:
@@ -181,6 +203,57 @@ def create_app(
         if project is None:
             raise HTTPException(status_code=404, detail="project not found")
         return project
+
+    @app.post("/projects/{project_id}/uploads", status_code=status.HTTP_201_CREATED)
+    def create_upload(project_id: str, payload: UploadCreate) -> dict:
+        try:
+            return create_upload_record(
+                app_engine,
+                app_data_root,
+                project_id=project_id,
+                filename=payload.filename,
+                label=payload.label,
+                role=payload.role,
+                total_bytes=payload.total_bytes,
+                total_chunks=payload.total_chunks,
+            )
+        except UploadNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except UploadError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/upload/{upload_id}")
+    def get_upload(upload_id: str) -> dict:
+        try:
+            return get_upload_status_record(app_data_root, upload_id)
+        except UploadNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except UploadError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/upload/{upload_id}/chunk/{index}")
+    async def upload_chunk(upload_id: str, index: int, request: Request) -> dict:
+        try:
+            return write_upload_chunk(app_data_root, upload_id, index, await request.body())
+        except UploadNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except UploadError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/upload/{upload_id}/complete", status_code=status.HTTP_201_CREATED)
+    def complete_upload(upload_id: str, payload: UploadComplete) -> dict:
+        try:
+            return complete_upload_record(
+                app_engine,
+                app_data_root,
+                upload_id=upload_id,
+                expected_sha256=payload.sha256.lower(),
+                expected_total_bytes=payload.total_bytes,
+            )
+        except UploadNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except UploadError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return app
 

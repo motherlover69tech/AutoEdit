@@ -44,13 +44,20 @@ Read those before implementing.
   - Brute-force login lockout and `PUBLIC_DOMAIN` origin checks are covered by tests.
   - Caddy reverse-proxy template exists in `infra/proxy/`.
   - Remaining Stage 7.0 gate: deploy/verify TLS cert provisioning + HTTP→HTTPS redirect on the real public domain.
+- Stage 3.2 chunked resumable upload is implemented and locally tested:
+  - `POST /projects/{project_id}/uploads` starts an upload session under `/data/<project_id>/.uploads/<upload_id>/`.
+  - `POST /upload/{upload_id}/chunk/{index}` writes indexed chunk part files.
+  - `GET /upload/{upload_id}` reports highest contiguous chunk for resume.
+  - `POST /upload/{upload_id}/complete` assembles chunks, validates byte count + SHA-256, atomically moves to `source/<filename>`, cleans temp files, and inserts an `angles` row.
+  - Upload filename/upload id path traversal, wrong SHA cleanup, interrupted/resumed upload, and three uploads to one project are covered by tests.
+  - Upload routes are protected by the Stage 7 auth middleware when auth is enabled.
 - No frontend exists yet.
 
 ## Immediate next job
 
-Finish **Stage 7.0 — Auth gate + reverse proxy** by deploying/verifying the proxy/TLS manual gate on the real public domain. Do not start upload/media exposure until this is done.
+Finish **Stage 7.0 — Auth gate + reverse proxy** by deploying/verifying the proxy/TLS manual gate on the real public domain. Do not expose upload/media routes publicly until this is done.
 
-If TLS/public-domain details are not available, the next code job is Stage 3.2 chunked resumable upload, but keep all upload/media routes behind the auth middleware added in Stage 7.0.
+If TLS/public-domain details are not available, the next code job is **Stage 3.3 — Probe & channel mapping** using the uploaded `source/` files.
 
 ## Key architecture constraints
 

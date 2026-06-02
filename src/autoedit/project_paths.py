@@ -16,13 +16,17 @@ PROJECT_SUBDIRS = (
 _ULID_RE = re.compile(r"^[0-9A-HJKMNP-TV-Z]{26}$")
 
 
+def is_ulid(value: str) -> bool:
+    return bool(_ULID_RE.fullmatch(value))
+
+
 def project_root(data_root: str | Path, project_id: str) -> Path:
     """Return the confined root path for a project id.
 
     Project ids are ULIDs. Rejecting anything else prevents path traversal before later
     media/upload stages start accepting user-controlled names.
     """
-    if not _ULID_RE.fullmatch(project_id):
+    if not is_ulid(project_id):
         raise ValueError("project_id must be a 26-character ULID")
     return Path(data_root) / project_id
 

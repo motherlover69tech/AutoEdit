@@ -28,6 +28,17 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 - **Remaining manual gate:** deploy Caddy/reverse proxy for the real `PUBLIC_DOMAIN`; verify TLS cert, HTTP→HTTPS redirect, `401` on protected routes without a session, and no direct `/data` exposure.
 - **Planning doc:** `docs/plans/stage-7.0-auth-gate-reverse-proxy.md`
 
+### Job 3.2 — Chunked resumable upload
+
+- **Status:** done
+- **Depends on:** 3.1; protected by Stage 7.0 backend auth gate when auth is enabled
+- **Spec stage:** 3.2
+- **Goal:** get three large files onto the array without timeout failures.
+- **Build:** upload sessions, chunk write/status, SHA-256 completion, atomic source move, `angles` row creation.
+- **Required tests:** interrupted/resumed upload, wrong SHA cleanup, filename/upload-id traversal rejection, three uploads to one project.
+- **Latest local result:** `env -u VIRTUAL_ENV uv run pytest -q` → `35 passed, 1 skipped`.
+- **Planning doc:** `docs/plans/stage-3.2-chunked-resumable-upload.md`
+
 ### Job 3.1 — Project + DB bootstrap
 
 - **Status:** done
@@ -47,7 +58,7 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 | DB-0 | Existing MySQL wiring | done | 3.1 code | verified against Peter's existing MySQL server |
 | 3.1 | Project + DB bootstrap | done | none | schema, `POST /projects`, `GET /projects/:id`, project skeleton; canonical MySQL gate passed |
 | 7.0 | Auth gate + reverse proxy | in_progress | 3.1, DB-0 | backend auth/session/rate limits/origin checks pass; TLS proxy manual gate pending |
-| 3.2 | Chunked resumable upload | pending | 3.1 | resumable chunk upload + SHA verification |
+| 3.2 | Chunked resumable upload | done | 3.1 | resumable chunk upload + SHA verification + angles rows |
 | 3.3 | Probe & channel mapping | pending | 3.2 | ffprobe metadata, angle rows, speaker channel mapping |
 | 3.4 | Channel extraction + audio sync | pending | 3.3 | speaker WAVs, cross-correlation sync offsets |
 | 3.5 | Main proxy normalisation | pending | 3.3 | silent 720p short-GOP proxies |

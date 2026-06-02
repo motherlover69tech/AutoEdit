@@ -117,7 +117,7 @@ env -u VIRTUAL_ENV uv run pytest -q
 
 Latest local result without MySQL URL: `17 passed, 1 skipped`.
 
-Latest local result after Stage 7.0 backend auth gate: `24 passed, 1 skipped`.
+Latest local result after Stage 3.2 chunked upload: `35 passed, 1 skipped`.
 
 Canonical existing-MySQL integration commands:
 
@@ -151,6 +151,17 @@ Security tests added in `tests/test_auth_gate.py` cover:
 - `GET /auth/me` returns reviewer display name from the session.
 - Failed login lockout returns `429` after threshold.
 - Unexpected `Origin` returns `403`; configured `PUBLIC_DOMAIN` origin passes.
+
+Upload tests added in `tests/test_uploads_api.py` cover:
+
+- Upload routes require auth when auth is enabled.
+- Missing project returns `404`.
+- Filename path traversal is rejected.
+- Invalid upload ids / chunk indexes are rejected.
+- Interrupted upload can resume from highest contiguous chunk.
+- Complete validates byte count and SHA-256, writes exact source bytes, and inserts an `angles` row.
+- Wrong SHA is rejected and temp upload files are cleaned up.
+- Three uploads to one project complete and create three `angles` rows.
 
 Latest temporary-dev-MySQL result: `1 passed in 1.58s`.
 
