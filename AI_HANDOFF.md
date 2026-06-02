@@ -21,6 +21,8 @@ Read those before implementing.
 ## Current implementation state
 
 - Backend stack chosen: Python 3.12 + FastAPI + SQLAlchemy Core + pytest, managed with `uv`.
+- Latest code checkpoint: `467cec9 feat: add chunked upload pipeline`.
+- Latest local verification: `env -u VIRTUAL_ENV uv run pytest -q` → `35 passed, 1 skipped`.
 - Stage 3.1 code is implemented and deployment-DB verified.
   - DB schema tables for spec Section 2.2.
   - Idempotent `run_migrations(engine)` helper using SQLAlchemy metadata.
@@ -34,7 +36,8 @@ Read those before implementing.
 - **Canonical DB decision:** use Peter's existing MySQL server, not the temporary `autoedit-mysql` container.
   - Required creds/details are documented in `docs/plans/EXISTING_MYSQL_REQUIREMENTS.md`.
   - Existing MySQL verification command used direct `DB_*` env vars to avoid URL-encoding issues with special-character passwords.
-  - Latest canonical DB result: `DB_HOST=192.168.50.50 DB_PORT=3306 DB_NAME=autoedit DB_USER=autoedit DB_PASSWORD=*** env -u VIRTUAL_ENV uv run pytest -q` → `18 passed in 1.82s`.
+  - Latest canonical DB result after Stage 7.0 backend auth: existing MySQL `DB_*` env vars → `25 passed in 1.90s`.
+  - Stage 3.2 was verified locally after this; do not preserve real DB password in docs or commands.
   - Temporary dev DB: `/mnt/user/appdata/autoedit-mysql/compose.yaml`, container `autoedit-mysql`, bound to Unraid `127.0.0.1:3307` only. It is currently stopped and should not be used as the canonical DB.
 - Stage 7.0 backend auth gate is implemented and tested locally:
   - Signed httpOnly session cookie login at `POST /auth/login`.
@@ -57,11 +60,18 @@ Read those before implementing.
 
 Finish **Stage 7.0 — Auth gate + reverse proxy** by deploying/verifying the proxy/TLS manual gate on the real public domain. Do not expose upload/media routes publicly until this is done.
 
-If TLS/public-domain details are not available, the next code job is **Stage 3.3 — Probe & channel mapping** using the uploaded `source/` files.
+If TLS/public-domain details are not available, the next code job is **Stage 3.3 — Probe & channel mapping** using the uploaded `source/` files. Start with `docs/plans/stage-3.3-probe-channel-mapping.md`.
+
+## Known blockers / manual gates
+
+- Stage 7.0 is not fully done until the real public-domain proxy/TLS gate is verified.
+- No public upload/media exposure until Stage 7.0 manual gate passes.
+- No golden media fixtures have been added yet; Stage 3.3 plan calls for tiny generated media, mocked `ffprobe` JSON fixtures, or a documented fixture acquisition path.
+- Frontend has not started.
 
 ## Key architecture constraints
 
-- Backend may be Node or Python; choose deliberately before first code and record decision here.
+- Backend is Python 3.12 + FastAPI + SQLAlchemy Core + pytest. Do not revisit this unless Peter explicitly asks.
 - All services must be Docker-friendly for Unraid.
 - Data paths are under `DATA_ROOT`, default `/mnt/user/automulticam`, mounted as `/data` in containers.
 - Never expose `/data` directly as static files.

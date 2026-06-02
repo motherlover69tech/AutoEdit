@@ -141,6 +141,8 @@ DB_PASSWORD='***' \
 
 Latest canonical existing-MySQL result after Stage 7.0 backend auth gate: `25 passed in 1.90s`.
 
+Stage 3.2 was verified with the local SQLite-backed suite after that: `35 passed, 1 skipped`. Existing-MySQL credentials must be supplied in process env to rerun the DB-enabled suite; never paste or preserve the real password in docs/log summaries.
+
 Security tests added in `tests/test_auth_gate.py` cover:
 
 - `/health` public while auth is enabled.

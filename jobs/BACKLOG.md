@@ -6,6 +6,16 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ## Current next job
 
+1. **Finish Stage 7.0 manual proxy/TLS gate** before any public upload/media exposure:
+   - configure/confirm real `PUBLIC_DOMAIN`
+   - verify TLS cert provisioning
+   - verify HTTP → HTTPS redirect
+   - verify protected routes return `401` without session
+   - verify `/data` is not exposed directly
+2. If public-domain/TLS details are unavailable, continue local code work with **Stage 3.3 — Probe & channel mapping**.
+
+## Detailed jobs
+
 ### Job DB-0 — Existing MySQL wiring
 
 - **Status:** done
@@ -59,7 +69,7 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 | 3.1 | Project + DB bootstrap | done | none | schema, `POST /projects`, `GET /projects/:id`, project skeleton; canonical MySQL gate passed |
 | 7.0 | Auth gate + reverse proxy | in_progress | 3.1, DB-0 | backend auth/session/rate limits/origin checks pass; TLS proxy manual gate pending |
 | 3.2 | Chunked resumable upload | done | 3.1 | resumable chunk upload + SHA verification + angles rows |
-| 3.3 | Probe & channel mapping | pending | 3.2 | ffprobe metadata, angle rows, speaker channel mapping |
+| 3.3 | Probe & channel mapping | pending | 3.2 | ffprobe metadata, angle rows, speaker channel mapping; plan saved at `docs/plans/stage-3.3-probe-channel-mapping.md` |
 | 3.4 | Channel extraction + audio sync | pending | 3.3 | speaker WAVs, cross-correlation sync offsets |
 | 3.5 | Main proxy normalisation | pending | 3.3 | silent 720p short-GOP proxies |
 | 3.5b | Low-bitrate remote proxy tier | pending | 3.5 | silent 360p / low-bandwidth proxies |
