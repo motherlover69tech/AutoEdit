@@ -21,24 +21,29 @@ Read those before implementing.
 ## Current implementation state
 
 - Backend stack chosen: Python 3.12 + FastAPI + SQLAlchemy Core + pytest, managed with `uv`.
-- Stage 3.1 local implementation exists under `src/autoedit/`:
+- **Stage 3.1 — Project + DB bootstrap is done.**
   - DB schema tables for spec Section 2.2.
   - Idempotent `run_migrations(engine)` helper using SQLAlchemy metadata.
   - `POST /projects` and `GET /projects/:id`.
   - `DATA_ROOT` project skeleton creation.
   - Atomic `project.json` manifest write.
   - Strict invalid-FPS validation returning HTTP 400.
-- Tests exist under `tests/` and pass locally against SQLite in-memory.
-- Docker/deployment packaging and live MySQL verification are not done yet.
+  - Local SQLite-backed tests pass.
+  - Real MySQL 8 integration test passes through the Unraid dev DB.
+- Dev MySQL is deployed on Unraid:
+  - Compose path: `/mnt/user/appdata/autoedit-mysql/compose.yaml`
+  - Container: `autoedit-mysql`
+  - Host binding: `127.0.0.1:3307:3306` on Unraid only.
+  - Use `./scripts/mysql-tunnel.sh`, then `./scripts/test-mysql-unraid.sh`.
 - No frontend exists yet.
 
 ## Immediate next job
 
-Finish **Stage 3.1 verification** before moving to 7.0/3.2:
+Proceed to **Stage 7.0 — Auth gate + reverse proxy** before upload/media exposure:
 
-- Run the same migration/API flow against a real MySQL 8 database using `DB_*`.
-- If MySQL passes, mark Stage 3.1 done in `jobs/BACKLOG.md`.
-- Then proceed to **Stage 7.0 — Auth gate + reverse proxy**.
+- Plan and implement session auth, password hashing/shared-password minimum, reviewer display name, protected routes, rate limiting, and CORS/origin checks.
+- Keep `/health` public; all other routes should require auth once 7.0 is active.
+- Add tests proving unauthenticated access is blocked and login/session works.
 
 ## Key architecture constraints
 

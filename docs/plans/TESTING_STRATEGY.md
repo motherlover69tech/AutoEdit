@@ -115,7 +115,21 @@ Current local command:
 env -u VIRTUAL_ENV uv run pytest -q
 ```
 
-Latest result: `17 passed in 1.56s`.
+Latest local result without MySQL URL: `17 passed, 1 skipped`.
+
+MySQL integration commands:
+
+```bash
+# terminal 1: open tunnel to Unraid-local MySQL
+./scripts/mysql-tunnel.sh
+
+# terminal 2: run MySQL gate using remote .env credentials
+./scripts/test-mysql-unraid.sh
+```
+
+Latest MySQL result: `1 passed in 1.58s`.
+
+Latest full suite with `AUTOEDIT_MYSQL_TEST_URL` set: `18 passed in 1.77s`.
 
 ## Stage 3.1 initial test plan
 
@@ -148,7 +162,7 @@ Current coverage:
 
 Remaining Stage 3.1 gate:
 
-- Run against real MySQL 8 using `DB_*`. Local tests use SQLite in-memory because no live MySQL service is available in this workspace.
+- Complete: real MySQL 8 verification passes through the Unraid dev DB (`autoedit-mysql`).
 
 ## Rule for future AI sessions
 

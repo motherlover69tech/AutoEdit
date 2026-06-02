@@ -6,22 +6,31 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ## Current next job
 
+### Job 7.0 — Auth gate + reverse proxy
+
+- **Status:** pending
+- **Depends on:** 3.1
+- **Spec stage:** 7.0
+- **Goal:** require TLS/session auth before any public exposure; protect routes, add login/session handling, rate limit auth/upload, lock CORS to `PUBLIC_DOMAIN`.
+- **Required tests:** `/health` public; protected API routes blocked without session; login creates httpOnly session; brute-force/rate-limit behavior covered; reviewer display name persisted for later notes.
+- **Planning doc:** create before implementation: `docs/plans/stage-7.0-auth-gate-reverse-proxy.md`
+
 ### Job 3.1 — Project + DB bootstrap
 
-- **Status:** in_progress — local implementation/tests pass; live MySQL verification pending.
+- **Status:** done
 - **Depends on:** none
 - **Spec stage:** 3.1
 - **Goal:** create the first backend foundation: database schema, project creation endpoint, manifest endpoint, project folder skeleton, and `project.json`.
 - **Required tests:** migration idempotency, project creation, invalid FPS rejected, `project.json` matches DB.
 - **Planning doc:** `docs/plans/stage-3.1-project-db-bootstrap.md`
-- **Latest local test:** `env -u VIRTUAL_ENV uv run pytest -q` → `17 passed in 1.56s`.
-- **Remaining gate:** run migrations/API flow against real MySQL 8 via `DB_*`.
+- **Latest local test:** `env -u VIRTUAL_ENV uv run pytest -q` → `17 passed, 1 skipped`.
+- **Latest MySQL gate:** `./scripts/mysql-tunnel.sh` + `./scripts/test-mysql-unraid.sh` → `1 passed`; full suite with `AUTOEDIT_MYSQL_TEST_URL` → `18 passed`.
 
 ## Stage backlog
 
 | Job | Stage | Status | Depends on | Output |
 | --- | --- | --- | --- | --- |
-| 3.1 | Project + DB bootstrap | in_progress | none | local schema/API/project skeleton done; MySQL verification pending |
+| 3.1 | Project + DB bootstrap | done | none | schema, `POST /projects`, `GET /projects/:id`, project skeleton; MySQL gate passed |
 | 7.0 | Auth gate + reverse proxy | pending | 3.1 | TLS proxy, auth/session, rate limits, CORS |
 | 3.2 | Chunked resumable upload | pending | 3.1 | resumable chunk upload + SHA verification |
 | 3.3 | Probe & channel mapping | pending | 3.2 | ffprobe metadata, angle rows, speaker channel mapping |
