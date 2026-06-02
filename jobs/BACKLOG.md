@@ -8,18 +8,20 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ### Job 3.1 — Project + DB bootstrap
 
-- **Status:** pending
+- **Status:** in_progress — local implementation/tests pass; live MySQL verification pending.
 - **Depends on:** none
 - **Spec stage:** 3.1
 - **Goal:** create the first backend foundation: database schema, project creation endpoint, manifest endpoint, project folder skeleton, and `project.json`.
 - **Required tests:** migration idempotency, project creation, invalid FPS rejected, `project.json` matches DB.
-- **Planning doc:** create before implementation if missing: `docs/plans/stage-3.1-project-db-bootstrap.md`
+- **Planning doc:** `docs/plans/stage-3.1-project-db-bootstrap.md`
+- **Latest local test:** `env -u VIRTUAL_ENV uv run pytest -q` → `17 passed in 1.56s`.
+- **Remaining gate:** run migrations/API flow against real MySQL 8 via `DB_*`.
 
 ## Stage backlog
 
 | Job | Stage | Status | Depends on | Output |
 | --- | --- | --- | --- | --- |
-| 3.1 | Project + DB bootstrap | pending | none | schema, `POST /projects`, `GET /projects/:id`, project skeleton |
+| 3.1 | Project + DB bootstrap | in_progress | none | local schema/API/project skeleton done; MySQL verification pending |
 | 7.0 | Auth gate + reverse proxy | pending | 3.1 | TLS proxy, auth/session, rate limits, CORS |
 | 3.2 | Chunked resumable upload | pending | 3.1 | resumable chunk upload + SHA verification |
 | 3.3 | Probe & channel mapping | pending | 3.2 | ffprobe metadata, angle rows, speaker channel mapping |

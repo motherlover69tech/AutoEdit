@@ -107,9 +107,19 @@ Some gates are explicitly manual and must be recorded in stage notes:
 - FCPXML opens populated in DaVinci Resolve.
 - Cuts in Resolve land on the same frames as player preview.
 
+## Test command
+
+Current local command:
+
+```bash
+env -u VIRTUAL_ENV uv run pytest -q
+```
+
+Latest result: `17 passed in 1.56s`.
+
 ## Stage 3.1 initial test plan
 
-When implementing Stage 3.1, write tests for:
+Implemented tests for:
 
 1. Migrations run on empty DB.
 2. Migrations are idempotent when re-run.
@@ -129,6 +139,16 @@ When implementing Stage 3.1, write tests for:
    - `fps_den=0`
    - non-integer values
    - missing values
+
+Current coverage:
+
+- `tests/test_migrations.py` verifies required tables are created, migration helper is idempotent, and media-time columns are integer-like.
+- `tests/test_project_paths.py` verifies the spec directory tree and path-traversal/invalid-id rejection.
+- `tests/test_projects_api.py` verifies `/health`, `POST /projects`, `GET /projects/:id`, manifest JSON, project skeleton creation, invalid FPS rejection, and missing-project 404.
+
+Remaining Stage 3.1 gate:
+
+- Run against real MySQL 8 using `DB_*`. Local tests use SQLite in-memory because no live MySQL service is available in this workspace.
 
 ## Rule for future AI sessions
 

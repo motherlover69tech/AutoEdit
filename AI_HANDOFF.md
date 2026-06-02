@@ -20,23 +20,25 @@ Read those before implementing.
 
 ## Current implementation state
 
-- Source docs copied into this workspace.
-- Handoff/project planning docs created.
-- No app code, Docker setup, DB schema, migrations, API, or frontend exists yet.
+- Backend stack chosen: Python 3.12 + FastAPI + SQLAlchemy Core + pytest, managed with `uv`.
+- Stage 3.1 local implementation exists under `src/autoedit/`:
+  - DB schema tables for spec Section 2.2.
+  - Idempotent `run_migrations(engine)` helper using SQLAlchemy metadata.
+  - `POST /projects` and `GET /projects/:id`.
+  - `DATA_ROOT` project skeleton creation.
+  - Atomic `project.json` manifest write.
+  - Strict invalid-FPS validation returning HTTP 400.
+- Tests exist under `tests/` and pass locally against SQLite in-memory.
+- Docker/deployment packaging and live MySQL verification are not done yet.
+- No frontend exists yet.
 
 ## Immediate next job
 
-Implement **Stage 3.1 — Project + DB bootstrap** from the spec.
+Finish **Stage 3.1 verification** before moving to 7.0/3.2:
 
-Required outputs for 3.1:
-
-- Migrations for all tables in spec Section 2.2.
-- `POST /projects` accepting `name`, `fps_num`, `fps_den`.
-- `GET /projects/:id` returning the manifest.
-- On project creation: create DB row, `/data/<id>/` skeleton, and `project.json` mirroring DB.
-- Invalid FPS rejected with HTTP 400.
-- Migrations idempotent.
-- Tests proving all of the above.
+- Run the same migration/API flow against a real MySQL 8 database using `DB_*`.
+- If MySQL passes, mark Stage 3.1 done in `jobs/BACKLOG.md`.
+- Then proceed to **Stage 7.0 — Auth gate + reverse proxy**.
 
 ## Key architecture constraints
 
