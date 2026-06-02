@@ -40,7 +40,7 @@ Read those before implementing.
 
 ## Immediate next job
 
-Proceed to **Stage 7.0 — Auth gate + reverse proxy** before upload/media exposure.
+Proceed with **Stage 7.0 — Auth gate + reverse proxy** before upload/media exposure. The plan is saved at `docs/plans/stage-7.0-auth-gate-reverse-proxy.md`; next implementation step is backend auth tests first.
 
 ## Key architecture constraints
 

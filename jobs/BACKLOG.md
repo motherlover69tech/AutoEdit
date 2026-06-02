@@ -19,12 +19,12 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ### Job 7.0 — Auth gate + reverse proxy
 
-- **Status:** pending
+- **Status:** in_progress — implementation plan created; backend auth tests/implementation next, TLS proxy deployment gate still pending.
 - **Depends on:** 3.1 + DB-0 for deployment DB verification
 - **Spec stage:** 7.0
 - **Goal:** require TLS/session auth before any public exposure; protect routes, add login/session handling, rate limit auth/upload, lock CORS to `PUBLIC_DOMAIN`.
 - **Required tests:** `/health` public; protected API routes blocked without session; login creates httpOnly session; brute-force/rate-limit behavior covered; reviewer display name persisted for later notes.
-- **Planning doc:** create before implementation: `docs/plans/stage-7.0-auth-gate-reverse-proxy.md`
+- **Planning doc:** `docs/plans/stage-7.0-auth-gate-reverse-proxy.md`
 
 ### Job 3.1 — Project + DB bootstrap
 
