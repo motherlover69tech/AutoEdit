@@ -1,0 +1,32 @@
+# Ignore local/runtime artifacts
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+build/
+coverage/
+.npm/
+
+# Media/test generated output
+/data/
+tmp/
+*.mp4
+*.mov
+*.m4a
+*.wav
+*.fcpxml
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

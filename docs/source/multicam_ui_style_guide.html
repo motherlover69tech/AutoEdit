@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multicam Auto-Edit — UI Style Guide & Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   VOICES MEDIA — PRODUCT UI SYSTEM
+   Multicam Auto-Edit Platform
+   Extends the Voices brand (Ink / Parchment / Signal Red,
+   DM Serif Display · IBM Plex Sans · IBM Plex Mono) into a
+   dark editing-application surface.
+   ============================================================ */
+:root{
+  /* Brand core (from Voices brand guide) */
+  --ink:#0F0F0E;
+  --paper:#F7F4EF;
+  --paper-alt:#EFECE6;
+  --red:#D43B2F;
+  --red-dark:#A52D23;
+  --red-pale:#FAE8E6;
+
+  /* Product surfaces — the app runs dark (editing context) */
+  --bg:#0F0F0E;            /* app background = Ink */
+  --surface-1:#1A1A18;     /* panels */
+  --surface-2:#232320;     /* raised cards, inputs */
+  --surface-3:#2E2E2A;     /* hover / active rows */
+  --line:#39392F;          /* hairline borders, warm */
+  --line-soft:rgba(247,244,239,.08);
+
+  /* Text on dark */
+  --t-hi:#F7F4EF;          /* primary = Parchment */
+  --t-mid:rgba(247,244,239,.66);
+  --t-low:rgba(247,244,239,.40);
+  --t-faint:rgba(247,244,239,.24);
+
+  /* Accents & data colours (timeline lanes, speakers, topics) */
+  --red-bright:#E5483B;
+  --presenter:#D43B2F;     /* Signal Red — primary speaker */
+  --interviewee:#3FA7A0;   /* teal, complementary, used elsewhere in your work */
+  --wide:#C9A227;          /* harvest gold — wide / establishing */
+  --overlap:#8C5BD6;       /* both speaking */
+  --silence:rgba(247,244,239,.10);
+  --ok:#5BA86B;
+  --warn:#C9A227;
+  --err:#E5483B;
+
+  --serif:'DM Serif Display',Georgia,serif;
+  --sans:'IBM Plex Sans',system-ui,sans-serif;
+  --mono:'IBM Plex Mono','Courier New',monospace;
+
+  --r-sm:4px; --r-md:8px; --r-lg:14px;
+  --pad:clamp(20px,4vw,56px);
+  --shadow:0 10px 40px rgba(0,0,0,.45);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;font-size:16px}
+body{
+  background:var(--bg);color:var(--t-hi);
+  font-family:var(--sans);font-weight:300;line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  background-image:
+    radial-gradient(1100px 500px at 85% -8%, rgba(212,59,47,.10), transparent 60%),
+    radial-gradient(900px 500px at -5% 18%, rgba(201,162,39,.05), transparent 55%);
+}
+/* grain overlay — printed/film texture nod */
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:9999;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+img,video,svg{max-width:100%;display:block}
+ul{list-style:none}
+a{color:inherit;text-decoration:none}
+code,.mono{font-family:var(--mono)}
+
+/* ── Layout shell ─────────────────────────────────────────── */
+.wrap{max-width:1180px;margin:0 auto;padding:0 var(--pad)}
+header.top{
+  position:sticky;top:0;z-index:50;
+  background:rgba(15,15,14,.82);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--line);
+}
+.top .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brandmark{font-family:var(--serif);font-size:24px;letter-spacing:-.01em}
+.brandmark .dot{color:var(--red)}
+.top nav{display:flex;gap:26px;font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase}
+.top nav a{color:var(--t-low);transition:color .2s}
+.top nav a:hover{color:var(--t-hi)}
+
+/* ── Hero ─────────────────────────────────────────────────── */
+.hero{padding:clamp(70px,12vw,150px) 0 clamp(50px,7vw,90px);position:relative}
+.kicker{font-family:var(--mono);font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:var(--red);margin-bottom:26px}
+.hero h1{font-family:var(--serif);font-size:clamp(46px,8.5vw,104px);line-height:.98;letter-spacing:-.025em}
+.hero h1 em{font-style:italic;color:var(--t-mid)}
+.hero p.lede{max-width:60ch;margin-top:30px;font-size:clamp(16px,1.6vw,19px);color:var(--t-mid);line-height:1.6}
+.hero .dotline{margin-top:46px;height:3px;width:120px;background:var(--red)}
+
+/* ── Section scaffold ─────────────────────────────────────── */
+section.block{padding:clamp(46px,7vw,84px) 0;border-top:1px solid var(--line)}
+.sec-head{display:flex;align-items:baseline;gap:18px;margin-bottom:38px}
+.sec-num{font-family:var(--mono);font-size:12px;color:var(--red);letter-spacing:.1em;padding-top:8px}
+.sec-head h2{font-family:var(--serif);font-size:clamp(30px,4.4vw,52px);letter-spacing:-.02em;line-height:1.02}
+.sec-head .sub{color:var(--t-low);font-size:14px;margin-top:6px}
+.lead{max-width:72ch;color:var(--t-mid);font-size:16px;margin-bottom:34px}
+
+h3.t{font-family:var(--serif);font-size:24px;letter-spacing:-.01em;margin:40px 0 16px}
+h4.t{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--t-low);margin:30px 0 14px}
+p.body{color:var(--t-mid);margin-bottom:14px;max-width:74ch}
+.mono-note{font-family:var(--mono);font-size:12.5px;color:var(--t-low);line-height:1.7}
+
+/* ── Grids & cards ────────────────────────────────────────── */
+.grid{display:grid;gap:18px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:840px){.g2,.g3,.g4{grid-template-columns:1fr}}
+.card{background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r-lg);padding:22px}
+.card.tight{padding:16px}
+
+/* ── Colour swatches ──────────────────────────────────────── */
+.sw{border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:var(--surface-1)}
+.sw .chip{height:84px}
+.sw .meta{padding:11px 13px}
+.sw .meta b{display:block;font-size:13px;font-weight:500;color:var(--t-hi)}
+.sw .meta span{font-family:var(--mono);font-size:11px;color:var(--t-low)}
+
+/* ── Type specimens ───────────────────────────────────────── */
+.spec{border-left:2px solid var(--red);padding-left:20px;margin:18px 0}
+.spec .label{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--t-low);margin-bottom:8px}
+.spec .demo{color:var(--t-hi)}
+
+/* ── Buttons & controls ───────────────────────────────────── */
+.btn{font-family:var(--sans);font-weight:500;font-size:13.5px;border:1px solid transparent;border-radius:var(--r-md);
+  padding:11px 20px;cursor:pointer;transition:all .18s;display:inline-flex;gap:9px;align-items:center;letter-spacing:.01em}
+.btn-primary{background:var(--red);color:#fff}
+.btn-primary:hover{background:var(--red-bright);transform:translateY(-1px)}
+.btn-ghost{background:transparent;color:var(--t-hi);border-color:var(--line)}
+.btn-ghost:hover{background:var(--surface-2);border-color:var(--t-low)}
+.btn-quiet{background:var(--surface-2);color:var(--t-mid)}
+.btn-quiet:hover{background:var(--surface-3);color:var(--t-hi)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-sm{padding:7px 13px;font-size:12px}
+
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+.seg button{font-family:var(--mono);font-size:12px;letter-spacing:.08em;background:var(--surface-1);color:var(--t-low);
+  border:none;padding:9px 16px;cursor:pointer;transition:all .15s;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:none}
+.seg button.on{background:var(--red);color:#fff}
+.seg button:not(.on):hover{background:var(--surface-2);color:var(--t-hi)}
+
+.field{margin-bottom:16px}
+.field label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--t-low);margin-bottom:7px}
+.input{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-md);
+  color:var(--t-hi);font-family:var(--sans);font-size:14px;padding:11px 13px;transition:border .18s}
+.input:focus{outline:none;border-color:var(--red)}
+.input::placeholder{color:var(--t-faint)}
+
+.range{appearance:none;width:100%;height:3px;background:var(--line);border-radius:3px;outline:none}
+.range::-webkit-slider-thumb{appearance:none;width:15px;height:15px;border-radius:50%;background:var(--red);cursor:pointer;border:2px solid var(--ink)}
+
+.pill{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+  padding:5px 11px;border-radius:100px;border:1px solid var(--line);color:var(--t-mid);background:var(--surface-1)}
+.pill .led{width:7px;height:7px;border-radius:50%}
+.badge{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;padding:3px 8px;border-radius:var(--r-sm)}
+.badge.ok{background:rgba(91,168,107,.16);color:var(--ok)}
+.badge.warn{background:rgba(201,162,39,.16);color:var(--warn)}
+.badge.err{background:rgba(229,72,59,.16);color:var(--err)}
+.badge.neutral{background:var(--surface-3);color:var(--t-mid)}
+
+/* ── Flow diagram ─────────────────────────────────────────── */
+.flow{display:flex;flex-wrap:wrap;gap:0;align-items:stretch;margin:8px 0 4px}
+.flow .step{flex:1;min-width:150px;background:var(--surface-1);border:1px solid var(--line);border-radius:var(--r-md);
+  padding:16px 16px 18px;position:relative}
+.flow .step .n{font-family:var(--mono);font-size:11px;color:var(--red);letter-spacing:.1em}
+.flow .step b{display:block;font-size:14.5px;font-weight:500;margin:8px 0 6px}
+.flow .step p{font-size:12.5px;color:var(--t-low);line-height:1.55}
+.flow .arrow{display:flex;align-items:center;color:var(--t-faint);padding:0 8px;font-size:20px}
+@media(max-width:840px){.flow .arrow{transform:rotate(90deg);padding:6px 0}.flow .step{min-width:100%}}
+
+/* ── Player mock ──────────────────────────────────────────── */
+.player{background:#0a0a09;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow)}
+.stage{position:relative;aspect-ratio:16/9;background:
+  repeating-linear-gradient(45deg,#15150f 0 22px,#121210 22px 44px);display:flex;align-items:center;justify-content:center}
+.stage .live{position:absolute;top:14px;left:14px;display:flex;gap:8px;align-items:center}
+.stage .ang-label{position:absolute;bottom:14px;left:14px;font-family:var(--mono);font-size:12px;letter-spacing:.1em;
+  background:rgba(15,15,14,.7);padding:6px 12px;border-radius:var(--r-sm);border:1px solid var(--line)}
+.stage .lut-tag{position:absolute;bottom:14px;right:14px}
+.stage .ghost{font-family:var(--serif);font-size:54px;color:rgba(247,244,239,.10);letter-spacing:-.02em}
+.transport{display:flex;align-items:center;gap:16px;padding:13px 16px;background:var(--surface-1);border-bottom:1px solid var(--line)}
+.transport .tc{font-family:var(--mono);font-size:13px;color:var(--t-mid)}
+.transport .play{width:38px;height:38px;border-radius:50%;background:var(--red);display:flex;align-items:center;justify-content:center;cursor:pointer;border:none}
+.transport .angsel{margin-left:auto}
+
+/* ── Timeline lanes ───────────────────────────────────────── */
+.tl{background:var(--surface-1);padding:14px 16px 18px}
+.tl .lane{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+.tl .lane:last-child{margin-bottom:0}
+.tl .lane .name{width:88px;flex-shrink:0;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--t-low);text-align:right}
+.tl .lane .track{flex:1;height:22px;background:var(--surface-2);border-radius:var(--r-sm);position:relative;overflow:hidden}
+.tl .seg-blk{position:absolute;top:0;bottom:0;border-radius:2px}
+.tl .wave{flex:1;height:30px;display:flex;align-items:center;gap:2px;background:var(--surface-2);border-radius:var(--r-sm);padding:0 4px;overflow:hidden}
+.tl .wave i{flex:1;background:var(--t-faint);border-radius:1px}
+.tl .note-mk{position:absolute;top:-3px;width:2px;height:28px;background:var(--wide)}
+.tl .note-mk.cut{background:var(--red);width:3px}
+.tl .playhead{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--t-hi);box-shadow:0 0 8px rgba(247,244,239,.5)}
+
+/* ── Spec table ───────────────────────────────────────────── */
+table.t{width:100%;border-collapse:collapse;font-size:13.5px}
+table.t th{text-align:left;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--t-low);padding:10px 12px;border-bottom:1px solid var(--line)}
+table.t td{padding:11px 12px;border-bottom:1px solid var(--line-soft);color:var(--t-mid);vertical-align:top}
+table.t td b{color:var(--t-hi);font-weight:500}
+table.t tr:hover td{background:var(--surface-1)}
+table.t code{font-size:12px;color:var(--red-bright)}
+
+/* ── Do / Don't ───────────────────────────────────────────── */
+.dd{border-radius:var(--r-md);padding:16px 18px;font-size:13.5px;line-height:1.6}
+.dd.do{background:rgba(91,168,107,.08);border:1px solid rgba(91,168,107,.3)}
+.dd.dont{background:rgba(229,72,59,.07);border:1px solid rgba(229,72,59,.28)}
+.dd .h{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;margin-bottom:8px}
+.dd.do .h{color:var(--ok)}.dd.dont .h{color:var(--err)}
+
+.spacing-demo{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.spacing-demo .u{background:var(--red);opacity:.8}
+.spacing-demo .lbl{font-family:var(--mono);font-size:10px;color:var(--t-low);margin-top:6px;text-align:center}
+
+footer.foot{border-top:1px solid var(--line);padding:46px 0 70px;color:var(--t-low);font-family:var(--mono);font-size:12px;letter-spacing:.06em}
+footer.foot .brandmark{font-family:var(--serif);font-size:20px;color:var(--t-hi);letter-spacing:0;margin-bottom:10px}
+.reveal{opacity:0;transform:translateY(18px);transition:opacity .7s,transform .7s}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brandmark">Voices<span class="dot">.</span></div>
+    <nav>
+      <a href="#foundations">Foundations</a>
+      <a href="#components">Components</a>
+      <a href="#patterns">Patterns</a>
+      <a href="#flow">UI Flow</a>
+      <a href="#voice">Voice</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero wrap">
+  <div class="kicker">Voices Media · Product Design System</div>
+  <h1>Multicam<br>Auto-Edit <em>UI guide.</em></h1>
+  <p class="lede">A design system for the interview auto-edit platform, built on the Voices brand. Editorial restraint, a dark editing surface, and a small, confident palette. This document is the single reference for anyone — human or AI — designing screens for the tool.</p>
+  <div class="dotline"></div>
+</div>
+
+<main>
+
+<!-- ============ FOUNDATIONS ============ -->
+<section class="block" id="foundations">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">01</div>
+      <div>
+        <h2>Foundations</h2>
+        <div class="sub">Colour, type, spacing — the inherited Voices core, extended for a product surface.</div>
+      </div>
+    </div>
+
+    <p class="lead">The marketing site lives in the light (Parchment). The <em>application</em> lives in the dark — long editing sessions, video-first, where a bright background fatigues the eye and washes out footage. The brand carries across through the same three voices: <b>Ink</b>, <b>Parchment</b>, and <b>Signal Red</b>. Red is rationed: it marks the one thing that matters on a screen, never decoration.</p>
+
+    <h3 class="t">Brand core</h3>
+    <div class="grid g4">
+      <div class="sw"><div class="chip" style="background:#0F0F0E"></div><div class="meta"><b>Ink</b><span>#0F0F0E · app bg</span></div></div>
+      <div class="sw"><div class="chip" style="background:#F7F4EF"></div><div class="meta"><b>Parchment</b><span>#F7F4EF · primary text</span></div></div>
+      <div class="sw"><div class="chip" style="background:#D43B2F"></div><div class="meta"><b>Signal Red</b><span>#D43B2F · the accent</span></div></div>
+      <div class="sw"><div class="chip" style="background:#A52D23"></div><div class="meta"><b>Red Dark</b><span>#A52D23 · pressed</span></div></div>
+    </div>
+
+    <h4 class="t">Surfaces (dark UI)</h4>
+    <div class="grid g4">
+      <div class="sw"><div class="chip" style="background:#1A1A18"></div><div class="meta"><b>Surface 1</b><span>#1A1A18 · panels</span></div></div>
+      <div class="sw"><div class="chip" style="background:#232320"></div><div class="meta"><b>Surface 2</b><span>#232320 · inputs/cards</span></div></div>
+      <div class="sw"><div class="chip" style="background:#2E2E2A"></div><div class="meta"><b>Surface 3</b><span>#2E2E2A · hover/active</span></div></div>
+      <div class="sw"><div class="chip" style="background:#39392F"></div><div class="meta"><b>Line</b><span>#39392F · hairlines</span></div></div>
+    </div>
+
+    <h4 class="t">Data colours — fixed meaning, never reused for decoration</h4>
+    <p class="body">These are semantic. A reviewer learns them once and reads the timeline at a glance. Presenter is Signal Red because the presenter drives the interview; the rest are chosen for contrast and colour-blind separation.</p>
+    <div class="grid g4">
+      <div class="sw"><div class="chip" style="background:#D43B2F"></div><div class="meta"><b>Presenter</b><span>#D43B2F · cam left</span></div></div>
+      <div class="sw"><div class="chip" style="background:#3FA7A0"></div><div class="meta"><b>Interviewee</b><span>#3FA7A0 · cam right</span></div></div>
+      <div class="sw"><div class="chip" style="background:#C9A227"></div><div class="meta"><b>Wide</b><span>#C9A227 · establishing</span></div></div>
+      <div class="sw"><div class="chip" style="background:#8C5BD6"></div><div class="meta"><b>Overlap</b><span>#8C5BD6 · both talking</span></div></div>
+    </div>
+
+    <h4 class="t">Status</h4>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:4px">
+      <span class="badge ok">Ready</span>
+      <span class="badge warn">Processing</span>
+      <span class="badge err">Error</span>
+      <span class="badge neutral">Queued</span>
+    </div>
+
+    <h3 class="t">Typography</h3>
+    <p class="body">Three typefaces, unchanged from the brand: <b>DM Serif Display</b> for headings and the wordmark, <b>IBM Plex Sans</b> (Light 300) for everything readable, <b>IBM Plex Mono</b> for labels, timecode, data, and any machine-truth on screen. In a tool full of numbers, the mono face does heavy lifting — every timestamp, threshold, and parameter is mono.</p>
+
+    <div class="spec">
+      <div class="label">Display · DM Serif Display</div>
+      <div class="demo" style="font-family:var(--serif);font-size:46px;line-height:1.05;letter-spacing:-.02em">The cut writes itself.</div>
+    </div>
+    <div class="spec">
+      <div class="label">Body · IBM Plex Sans Light 300</div>
+      <div class="demo" style="font-size:17px;color:var(--t-mid);max-width:60ch">Switch angles without skipping, overlay a look, and leave a note exactly where it matters. The interface stays out of the way of the footage.</div>
+    </div>
+    <div class="spec">
+      <div class="label">Data / labels · IBM Plex Mono</div>
+      <div class="demo mono" style="font-size:15px;color:var(--t-hi);letter-spacing:.04em">00:14:22:08 &nbsp; PRESENTER &nbsp; VAD −38dB &nbsp; min_shot 1200ms</div>
+    </div>
+
+    <h4 class="t">Type scale</h4>
+    <table class="t">
+      <tr><th>Token</th><th>Face</th><th>Size</th><th>Use</th></tr>
+      <tr><td><b>Display</b></td><td>DM Serif</td><td><code>clamp(46–104px)</code></td><td>Page titles, empty-state hero</td></tr>
+      <tr><td><b>H2 / panel title</b></td><td>DM Serif</td><td><code>30–52px</code></td><td>Section headers</td></tr>
+      <tr><td><b>H3</b></td><td>DM Serif</td><td><code>24px</code></td><td>Card / dialog titles</td></tr>
+      <tr><td><b>Body</b></td><td>Plex Sans 300</td><td><code>15–17px</code></td><td>Reading text</td></tr>
+      <tr><td><b>UI label</b></td><td>Plex Mono</td><td><code>11–12px</code> · <code>.12em</code> tracked, uppercase</td><td>Field labels, nav, lane names</td></tr>
+      <tr><td><b>Data</b></td><td>Plex Mono</td><td><code>13–15px</code></td><td>Timecode, params, thresholds</td></tr>
+    </table>
+
+    <h3 class="t">Spacing &amp; radii</h3>
+    <p class="body">An 8-point base. Components round at 8px, large containers at 14px, chips/inline at 4px. Generous negative space is part of the brand — let panels breathe.</p>
+    <div class="spacing-demo">
+      <div><div class="u" style="width:4px;height:30px"></div><div class="lbl">4</div></div>
+      <div><div class="u" style="width:8px;height:42px"></div><div class="lbl">8</div></div>
+      <div><div class="u" style="width:16px;height:56px"></div><div class="lbl">16</div></div>
+      <div><div class="u" style="width:24px;height:70px"></div><div class="lbl">24</div></div>
+      <div><div class="u" style="width:40px;height:90px"></div><div class="lbl">40</div></div>
+      <div><div class="u" style="width:56px;height:110px"></div><div class="lbl">56</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ COMPONENTS ============ -->
+<section class="block" id="components">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">02</div>
+      <div><h2>Components</h2><div class="sub">The working parts. Restrained by default, red only where action lives.</div></div>
+    </div>
+
+    <h3 class="t">Buttons</h3>
+    <div class="card">
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-primary">Generate rough cut</button>
+        <button class="btn btn-ghost">Add note</button>
+        <button class="btn btn-quiet">Cancel</button>
+        <button class="btn btn-primary btn-sm">Export</button>
+        <button class="btn btn-ghost" disabled>Disabled</button>
+      </div>
+      <p class="mono-note" style="margin-top:16px">One primary action per view. Primary = filled Signal Red. Ghost = bordered, for secondary. Quiet = filled surface, for tertiary / dismiss.</p>
+    </div>
+
+    <h3 class="t">Inputs &amp; selectors</h3>
+    <div class="grid g2">
+      <div class="card">
+        <div class="field"><label>Project name</label><input class="input" placeholder="Clapton interview — Mar 2026"></div>
+        <div class="field"><label>VAD threshold · presenter</label><input class="input mono" value="−38 dB"></div>
+        <div class="field" style="margin-bottom:0"><label>min_shot_ms</label><input type="range" class="range" value="40"></div>
+      </div>
+      <div class="card">
+        <h4 class="t" style="margin-top:0">Segmented control — angle select</h4>
+        <div class="seg">
+          <button class="on">AUTO</button><button>A · PRES</button><button>B · INT</button><button>C · WIDE</button>
+        </div>
+        <h4 class="t">Quality toggle (remote)</h4>
+        <div class="seg"><button class="on">AUTO</button><button>720p</button><button>360p</button></div>
+        <h4 class="t">Status badges &amp; pills</h4>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <span class="pill"><span class="led" style="background:var(--presenter)"></span>Presenter</span>
+          <span class="pill"><span class="led" style="background:var(--interviewee)"></span>Interviewee</span>
+          <span class="pill"><span class="led" style="background:var(--wide)"></span>Wide</span>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="t">Cards &amp; data</h3>
+    <div class="grid g3">
+      <div class="card tight"><h4 class="t" style="margin:0 0 10px">Speaker time</h4><div class="mono" style="font-size:28px;color:var(--t-hi)">62<span style="color:var(--t-low);font-size:16px">%</span></div><div class="mono-note">interviewee · 38m 04s</div></div>
+      <div class="card tight"><h4 class="t" style="margin:0 0 10px">Topics logged</h4><div class="mono" style="font-size:28px;color:var(--t-hi)">11</div><div class="mono-note">avg conciseness 3.6 / 5</div></div>
+      <div class="card tight"><h4 class="t" style="margin:0 0 10px">Cut length</h4><div class="mono" style="font-size:28px;color:var(--t-hi)">41m</div><div class="mono-note">rough · 214 clips</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PATTERNS: PLAYER ============ -->
+<section class="block" id="patterns">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">03</div>
+      <div><h2>Signature pattern — the review player</h2><div class="sub">The heart of the product. Footage first; chrome recedes; data sits beneath the frame.</div></div>
+    </div>
+    <p class="lead">The player is where the brand earns its keep. The frame is sacred — controls are quiet until needed, the current angle is always labelled, and the timeline below reads like a score: colour-coded lanes you can scan in a second and click to navigate.</p>
+
+    <div class="player">
+      <div class="transport">
+        <button class="play" aria-label="play">
+          <svg width="13" height="14" viewBox="0 0 13 14" fill="#fff"><path d="M0 0l13 7L0 14z"/></svg>
+        </button>
+        <span class="tc">00:14:22:08</span>
+        <span class="mono-note">/ 00:41:06:00</span>
+        <div class="angsel"><div class="seg"><button class="on">AUTO</button><button>A</button><button>B</button><button>C</button></div></div>
+      </div>
+      <div class="stage">
+        <span class="live"><span class="badge err">● LIVE CUT</span></span>
+        <span class="ghost">Voices.</span>
+        <span class="ang-label">B · INTERVIEWEE</span>
+        <span class="lut-tag pill"><span class="led" style="background:var(--wide)"></span>LUT · clapton_look.cube</span>
+      </div>
+      <div class="tl">
+        <div class="lane">
+          <span class="name">Angle</span>
+          <div class="track" id="angle-track">
+            <div class="playhead" style="left:46%"></div>
+          </div>
+        </div>
+        <div class="lane">
+          <span class="name">Topics</span>
+          <div class="track" id="topic-track"></div>
+        </div>
+        <div class="lane">
+          <span class="name">Energy</span>
+          <div class="wave" id="wave"></div>
+        </div>
+        <div class="lane">
+          <span class="name">Notes</span>
+          <div class="track" id="note-track" style="background:transparent"></div>
+        </div>
+      </div>
+    </div>
+    <p class="mono-note" style="margin-top:14px">Lane order is fixed: <b>Angle</b> (who's on screen) → <b>Topics</b> (colour = subject) → <b>Energy</b> (waveform) → <b>Notes</b> (markers; red = cut suggestion). Click any block or marker to seek. The white playhead is the only pure-white element on the timeline.</p>
+
+    <div class="grid g2" style="margin-top:30px">
+      <div class="dd do"><div class="h">Do</div>Keep the angle label visible at all times. Let the operator drop back to AUTO from any manual override with one click. Animate angle switches as an instant cut, never a fade — this is an edit tool, cuts are the language.</div>
+      <div class="dd dont"><div class="h">Don't</div>Never stack controls over the centre of the frame. Never use red for anything other than presenter, the live-cut marker, cut-suggestion notes, and the single primary action. No spinners over playing video — buffer by holding the current angle.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ UI FLOW ============ -->
+<section class="block" id="flow">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">04</div>
+      <div><h2>The UI flow</h2><div class="sub">Five screens, one direction of travel: get footage in, let it process, review, refine, export.</div></div>
+    </div>
+    <p class="lead">The product has a deliberately linear spine. A reviewer should never wonder what to do next — each screen ends by handing off to the next. Processing is the long, unattended middle; everything before it is fast setup, everything after is craft.</p>
+
+    <div class="flow">
+      <div class="step"><span class="n">01</span><b>Sign in</b><p>TLS gate. Set your reviewer display name — it tags your notes.</p></div>
+      <div class="arrow">→</div>
+      <div class="step"><span class="n">02</span><b>Create &amp; ingest</b><p>New project, upload three angles, map audio channels to speakers, nudge sync.</p></div>
+      <div class="arrow">→</div>
+      <div class="step"><span class="n">03</span><b>Process</b><p>Unattended. Sync, proxies, VAD, transcription, AI topics, rough cut. Watch progress or leave.</p></div>
+      <div class="arrow">→</div>
+      <div class="step"><span class="n">04</span><b>Review</b><p>Player. Watch the auto-cut, switch angles, read topics, leave notes.</p></div>
+      <div class="arrow">→</div>
+      <div class="step"><span class="n">05</span><b>Refine &amp; export</b><p>Tweak params, request sub-edits, export validated FCPXML to Resolve.</p></div>
+    </div>
+
+    <h3 class="t">Screen 01 · Sign in</h3>
+    <p class="body">Single centred card on Ink, wordmark above. One password field (or username + password), one display-name field. Calm and bare — this is the only light-touch screen. Failed attempts shake the card and show a mono error line; no detail leaked.</p>
+
+    <h3 class="t">Screen 02 · Create &amp; ingest</h3>
+    <p class="body">A two-step setup that fits one screen. Left: project name and frame rate. Right: three upload dropzones (A / B / C) showing chunked-upload progress bars in Signal Red. Once probed, an audio-channel mapping panel appears — for each detected channel, a speaker dropdown and a ±ms sync nudge. A clapper hint helps. The primary button — "Start processing" — stays disabled until all three angles are mapped.</p>
+    <div class="card">
+      <h4 class="t" style="margin-top:0">Channel mapping — example state</h4>
+      <table class="t">
+        <tr><th>Source</th><th>Channel</th><th>Speaker</th><th>Sync nudge</th><th></th></tr>
+        <tr><td>Angle A</td><td><code>0 · left</code></td><td><b>Presenter</b></td><td class="mono">+0 ms</td><td><span class="badge ok">mapped</span></td></tr>
+        <tr><td>Angle A</td><td><code>1 · right</code></td><td><b>Interviewee</b></td><td class="mono">+0 ms</td><td><span class="badge ok">mapped</span></td></tr>
+        <tr><td>Angle B</td><td><code>—</code></td><td>—</td><td class="mono">−120 ms</td><td><span class="badge neutral">cam only</span></td></tr>
+        <tr><td>Angle C</td><td><code>—</code></td><td>Wide</td><td class="mono">+45 ms</td><td><span class="badge warn">check sync</span></td></tr>
+      </table>
+    </div>
+
+    <h3 class="t">Screen 03 · Processing</h3>
+    <p class="body">An honest progress screen — no fake spinners. Each sub-job is a row with its own state badge and a one-line plain-English message ("Transcribing interviewee channel — 6m of 41m"). The operator can close the tab; work continues. When everything is green, the screen turns over to a single primary button: "Open in player". Errors surface inline with a Retry on the failed sub-job only.</p>
+    <div class="card">
+      <table class="t">
+        <tr><th>Stage</th><th>State</th><th>Detail</th></tr>
+        <tr><td><b>Sync &amp; proxies</b></td><td><span class="badge ok">Done</span></td><td>3 angles, ±1 frame</td></tr>
+        <tr><td><b>Audio &amp; VAD</b></td><td><span class="badge ok">Done</span></td><td>2 channels, 412 intervals</td></tr>
+        <tr><td><b>Transcription</b></td><td><span class="badge warn">Running</span></td><td>interviewee · 6m / 41m</td></tr>
+        <tr><td><b>AI topic log</b></td><td><span class="badge neutral">Queued</span></td><td>—</td></tr>
+        <tr><td><b>Rough cut</b></td><td><span class="badge neutral">Queued</span></td><td>—</td></tr>
+      </table>
+    </div>
+
+    <h3 class="t">Screen 04 · Review</h3>
+    <p class="body">The player (Section 03) full-bleed, with a collapsible right rail: notes list (grouped by reviewer), topic index (click to jump), and the conciseness report. The rail never covers the frame — it pushes the player left. This is where reviewers spend their time, so it carries the most polish and the least chrome.</p>
+
+    <h3 class="t">Screen 05 · Refine &amp; export</h3>
+    <p class="body">Two halves. Left, the auto-edit parameters as labelled mono controls (min_shot, lead-in, overlap→wide, periodic wide) with a "Regenerate" that re-cuts live. Below them, a natural-language box — "1 minute on the immigration topic" — that produces a new sub-edit as its own version. Right, the cut versions list (rough / themed / social), each with an Export button that runs the CDL validator first and only then writes FCPXML. A blocked export shows the exact failing clip, never a blank file.</p>
+    <div class="grid g2">
+      <div class="dd do"><div class="h">Do</div>Make every parameter a labelled mono control with its live value shown. Keep "Regenerate" reversible — versions are cheap, nothing is destructive. Validate before export and explain any failure in one sentence.</div>
+      <div class="dd dont"><div class="h">Don't</div>Don't let export run on an unvalidated CDL. Don't hide which source files an export references. Don't bake the LUT into anything — it is preview-only.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ VOICE ============ -->
+<section class="block" id="voice">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">05</div>
+      <div><h2>Interface voice</h2><div class="sub">How the product speaks. Direct, spare, grounded — the brand voice, applied to buttons and errors.</div></div>
+    </div>
+    <p class="lead">Carried straight from the Voices brand: plain words, no hype, no cheerleading. The interface tells the truth about what's happening and what it needs. Labels are verbs. Errors say what broke and what to do.</p>
+    <div class="grid g2">
+      <div class="dd do"><div class="h">On voice</div>
+        "Start processing." · "FCPXML couldn't be written — clip 38 isn't on a frame boundary." · "Transcribing interviewee — 6m of 41m." · "Drop three angles to begin." · "Back to auto."
+      </div>
+      <div class="dd dont"><div class="h">Off voice</div>
+        "Let's get started! 🎬" · "Oops! Something went wrong." · "Your amazing edit is being magically created…" · "Awesome — upload complete!" · "Click here to continue your journey."
+      </div>
+    </div>
+    <p class="body" style="margin-top:26px">Microcopy rules: timecode and parameters are always mono. Numbers are never spelled out. Progress is concrete (units, counts), never a percentage alone. Buttons name the action that happens on click. Empty states use one DM Serif line and one quiet instruction.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <div class="brandmark">Voices<span style="color:var(--red)">.</span></div>
+    Multicam Auto-Edit · Product Design System · derived from the Voices Media brand guide<br>
+    Ink #0F0F0E · Parchment #F7F4EF · Signal Red #D43B2F · DM Serif Display / IBM Plex Sans / IBM Plex Mono
+  </div>
+</footer>
+
+<script>
+// timeline mock fills + reveal
+(function(){
+  var presenter='#D43B2F',interviewee='#3FA7A0',wide='#C9A227',overlap='#8C5BD6';
+  // angle lane segments [leftPct,widthPct,color]
+  var angle=[[0,18,presenter],[18,9,wide],[27,21,interviewee],[48,5,overlap],[53,16,presenter],[69,8,wide],[77,23,interviewee]];
+  var t=document.getElementById('angle-track');
+  angle.forEach(function(s){var d=document.createElement('div');d.className='seg-blk';d.style.left=s[0]+'%';d.style.width=s[1]+'%';d.style.background=s[2];d.style.opacity=.92;t.appendChild(d);});
+  // topics
+  var tcol=['#D43B2F','#3FA7A0','#C9A227','#8C5BD6','#5BA86B'];
+  var topics=[[0,22],[22,14],[36,19],[55,12],[67,33]];
+  var tt=document.getElementById('topic-track');
+  topics.forEach(function(s,i){var d=document.createElement('div');d.className='seg-blk';d.style.left=s[0]+'%';d.style.width=s[1]+'%';d.style.background=tcol[i%tcol.length];d.style.opacity=.55;tt.appendChild(d);});
+  // wave
+  var w=document.getElementById('wave');
+  for(var i=0;i<90;i++){var b=document.createElement('i');b.style.height=(15+Math.abs(Math.sin(i*0.7))*Math.random()*70).toFixed(0)+'%';w.appendChild(b);}
+  // notes
+  var nt=document.getElementById('note-track');
+  [[24,0],[41,1],[58,0],[73,1]].forEach(function(n){var m=document.createElement('div');m.className='note-mk'+(n[1]?' cut':'');m.style.left=n[0]+'%';nt.appendChild(m);});
+  // reveal
+  var io=new IntersectionObserver(function(es){es.forEach(function(e){if(e.isIntersecting)e.target.classList.add('in');});},{threshold:.12});
+  document.querySelectorAll('section.block').forEach(function(s){s.classList.add('reveal');io.observe(s);});
+})();
+</script>
+</body>
+</html>
