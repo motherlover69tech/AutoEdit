@@ -1,0 +1,27 @@
+TITLE: AUTOEDIT Export
+FCM: NON-DROP FRAME
+
+001  WIDE     V     C        00:00:00:00 00:00:03:00 00:00:00:00 00:00:03:00
+* FROM CLIP NAME: wide.mp4
+* LOC: 00:00:00:12 [note] Peter: Establishing shot
+
+002  PRESEN   V     C        00:00:00:00 00:00:05:00 00:00:03:00 00:00:08:00
+* FROM CLIP NAME: presenter.mp4
+* LOC: 00:00:04:12 [cut_suggestion] Peter: Check audio level
+
+003  WIDE     V     C        00:00:03:02 00:00:05:02 00:00:08:00 00:00:10:00
+* FROM CLIP NAME: wide.mp4
+* LOC: 00:00:09:00 [cut_suggestion] Guest: Stay on presenter
+
+004  GUEST    V     C        00:00:00:00 00:00:04:00 00:00:10:00 00:00:14:00
+* FROM CLIP NAME: guest.mp4
+* LOC: 00:00:12:00 [note] Peter: Guest answer strong
+
+005  PRESEN   V     C        00:00:05:03 00:00:11:03 00:00:14:00 00:00:20:00
+* FROM CLIP NAME: presenter.mp4
+* LOC: 00:00:17:00 [note] Peter: Good energy here
+
+006  WIDE     V     C        00:00:05:05 00:00:08:05 00:00:20:00 00:00:23:00
+* FROM CLIP NAME: wide.mp4
+* LOC: 00:00:21:13 [note] Guest: Nice closing shot
+

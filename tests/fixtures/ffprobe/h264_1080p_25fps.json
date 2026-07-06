@@ -1,0 +1,41 @@
+{
+  "streams": [
+    {
+      "index": 0,
+      "codec_name": "h264",
+      "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",
+      "codec_type": "video",
+      "width": 1920,
+      "height": 1080,
+      "coded_width": 1920,
+      "coded_height": 1088,
+      "r_frame_rate": "25/1",
+      "avg_frame_rate": "25/1",
+      "duration_ts": 750750,
+      "duration": "30.030000",
+      "pix_fmt": "yuv420p",
+      "level": 40,
+      "profile": "High"
+    },
+    {
+      "index": 1,
+      "codec_name": "aac",
+      "codec_long_name": "AAC (Advanced Audio Coding)",
+      "codec_type": "audio",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "sample_rate": "48000",
+      "duration_ts": 1441440,
+      "duration": "30.030000"
+    }
+  ],
+  "format": {
+    "filename": "source/angleB.mp4",
+    "nb_streams": 2,
+    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+    "format_long_name": "QuickTime / MOV",
+    "duration": "30.030000",
+    "size": "47185920",
+    "bit_rate": "12570600"
+  }
+}

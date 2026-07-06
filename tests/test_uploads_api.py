@@ -60,16 +60,20 @@ def start_upload(
     role: str = "cam_left",
     total_bytes: int = 12,
     total_chunks: int = 3,
+    chunk_bytes: int | None = None,
 ):
+    payload = {
+        "filename": filename,
+        "label": label,
+        "role": role,
+        "total_bytes": total_bytes,
+        "total_chunks": total_chunks,
+    }
+    if chunk_bytes is not None:
+        payload["chunk_bytes"] = chunk_bytes
     return client.post(
         f"/projects/{project_id}/uploads",
-        json={
-            "filename": filename,
-            "label": label,
-            "role": role,
-            "total_bytes": total_bytes,
-            "total_chunks": total_chunks,
-        },
+        json=payload,
     )
 
 
@@ -183,6 +187,37 @@ def test_interrupted_upload_resumes_and_complete_writes_source_and_angle(project
     assert count == 1
 
 
+def test_complete_upload_without_client_sha_hashes_on_server(project):
+    project_body, client, data_root, _ = project
+    content = b"large-file-bytes"
+
+    created = start_upload(
+        client,
+        project_body["id"],
+        filename="server-hashed.mp4",
+        total_bytes=len(content),
+        total_chunks=2,
+        chunk_bytes=6,
+    )
+    assert created.status_code == 201
+    upload_id = created.json()["upload_id"]
+
+    assert client.post(f"/upload/{upload_id}/chunk/0", content=content[:6]).status_code == 200
+    assert client.post(f"/upload/{upload_id}/chunk/1", content=content[6:]).status_code == 200
+    assembled_path = data_root / project_body["id"] / ".uploads" / upload_id / "assembled.tmp"
+    assert assembled_path.read_bytes() == content
+
+    complete = client.post(
+        f"/upload/{upload_id}/complete",
+        json={"total_bytes": len(content)},
+    )
+
+    assert complete.status_code == 201
+    angle = complete.json()
+    assert angle["sha256"] is None
+    assert (data_root / project_body["id"] / "source" / "server-hashed.mp4").read_bytes() == content
+
+
 def test_wrong_sha_rejects_and_cleans_temp_upload(project):
     project_body, client, data_root, _ = project
     content = b"aaaabbbb"
@@ -241,3 +276,14 @@ def test_three_uploads_to_one_project_create_three_angles(project):
     with Session(engine) as session:
         count = session.execute(select(func.count()).select_from(angles)).scalar_one()
     assert count == 3
+
+
+def test_frontend_large_upload_does_not_pre_hash_entire_file():
+    app_js = (Path(__file__).resolve().parents[1] / "src" / "autoedit" / "web" / "app.js").read_text()
+
+    assert "file.arrayBuffer" not in app_js
+    assert "crypto.subtle.digest" not in app_js
+    assert "Hashing" not in app_js
+    assert "chunk_bytes: CHUNK_SIZE" in app_js
+    assert "Finalizing ${fmtBytes(file.size)} upload" in app_js
+    assert "JSON.stringify({ total_bytes: file.size })" in app_js

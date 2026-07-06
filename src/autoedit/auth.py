@@ -4,12 +4,14 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 
 SESSION_TTL_SECONDS = 60 * 60 * 24 * 7
+PASSWORD_HASH_ITERATIONS = 260_000
 
 
 def _b64encode(data: bytes) -> str:
@@ -25,6 +27,9 @@ def create_session_token(
     *,
     display_name: str,
     secret: str,
+    username: str | None = None,
+    role: str | None = None,
+    user_id: str | None = None,
     ttl_seconds: int = SESSION_TTL_SECONDS,
     now: float | None = None,
 ) -> str:
@@ -33,6 +38,12 @@ def create_session_token(
         "display_name": display_name,
         "exp": issued_at + ttl_seconds,
     }
+    if username:
+        payload["username"] = username
+    if role:
+        payload["role"] = role
+    if user_id:
+        payload["user_id"] = user_id
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     payload_b64 = _b64encode(payload_bytes)
     signature = hmac.new(secret.encode("utf-8"), payload_b64.encode("ascii"), hashlib.sha256)
@@ -63,7 +74,39 @@ def parse_session_token(token: str | None, *, secret: str, now: float | None = N
     if not isinstance(display_name, str) or not display_name.strip():
         return None
 
-    return {"display_name": display_name}
+    parsed: dict[str, Any] = {"display_name": display_name}
+    for key in ("username", "role", "user_id"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            parsed[key] = value
+    return parsed
+
+
+def hash_password(password: str, *, salt: str | None = None, iterations: int = PASSWORD_HASH_ITERATIONS) -> str:
+    if not password:
+        raise ValueError("password is required")
+    salt_value = salt or secrets.token_urlsafe(18)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt_value.encode("utf-8"),
+        iterations,
+    )
+    return f"pbkdf2_sha256${iterations}${salt_value}${_b64encode(digest)}"
+
+
+def verify_password(password: str, stored_hash: str | None) -> bool:
+    if not password or not stored_hash:
+        return False
+    try:
+        scheme, iter_str, salt, digest = stored_hash.split("$", 3)
+        if scheme != "pbkdf2_sha256":
+            return False
+        iterations = int(iter_str)
+    except (ValueError, TypeError):
+        return False
+    candidate = hash_password(password, salt=salt, iterations=iterations)
+    return hmac.compare_digest(candidate, stored_hash)
 
 
 @dataclass

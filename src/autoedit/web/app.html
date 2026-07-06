@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Voices · AUTOEDIT</title>
+  <link rel="stylesheet" href="/web/styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <a class="brandmark" href="/">Voices<span class="dot">.</span></a>
+      <nav class="nav" aria-label="Primary">
+        <a href="/" data-route="home">Projects</a>
+        <a href="/ingest" data-route="ingest">Create &amp; ingest</a>
+        <a href="/users/manage" data-route="users">Users</a>
+        <button id="logoutBtn" type="button">Logout</button>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <p class="kicker">Multicam Auto-Edit Platform</p>
+      <h1 id="pageTitle">The cut writes itself.</h1>
+      <p class="lede" id="pageLede">Create a project, upload three angles, map audio channels, then open the review player.</p>
+      <div class="dotline"></div>
+    </section>
+
+    <section id="statusLine" class="status-line" hidden></section>
+
+    <section id="homeView">
+      <div class="section-head"><span class="sec-num">01</span><h2>Projects</h2></div>
+      <div class="grid g2">
+        <article class="card">
+          <h3>Start a new edit</h3>
+          <p class="body-copy">Project setup and media ingest live on one page: project name, frame rate, three angle uploads, then channel mapping.</p>
+          <p><a class="btn btn-primary" href="/ingest">Create &amp; ingest</a></p>
+        </article>
+        <article class="card">
+          <h3>Reviewer session</h3>
+          <p class="mono-note" id="sessionInfo">Checking session…</p>
+        </article>
+      </div>
+      <div class="section-head"><span class="sec-num">02</span><h2>Recent projects</h2></div>
+      <div id="projectList" class="grid g3"></div>
+    </section>
+
+    <section id="ingestView" hidden>
+      <div class="flow" aria-label="Ingest flow">
+        <div class="step"><span class="n">01</span><b>Create</b><p>Name the project and choose its frame rate.</p></div><div class="arrow">→</div>
+        <div class="step"><span class="n">02</span><b>Upload</b><p>Drop A, B, C. Chunked uploads show exact progress.</p></div><div class="arrow">→</div>
+        <div class="step"><span class="n">03</span><b>Map audio</b><p>Select the speaker channels and sync nudges.</p></div>
+      </div>
+
+      <div class="grid g2">
+        <article class="card">
+          <h3>Project</h3>
+          <form id="projectForm">
+            <div class="field"><label for="projectName">Project name</label><input id="projectName" required placeholder="Clapton interview — Mar 2026"></div>
+            <div class="grid g2">
+              <div class="field"><label for="fpsNum">fps_num</label><input id="fpsNum" type="number" value="24000" min="1" required></div>
+              <div class="field"><label for="fpsDen">fps_den</label><input id="fpsDen" type="number" value="1001" min="1" required></div>
+            </div>
+            <button type="submit" class="primary" id="createProjectBtn">Create project</button>
+          </form>
+        </article>
+        <article class="card">
+          <h3>Active project</h3>
+          <p class="mono-note" id="activeProjectText">No project selected.</p>
+          <select id="projectSelect" aria-label="Existing projects"></select>
+        </article>
+      </div>
+
+      <div class="section-head"><span class="sec-num">04</span><h2>Upload angles</h2></div>
+      <div class="upload-grid" id="uploadGrid"></div>
+
+      <div class="section-head"><span class="sec-num">05</span><h2>Audio stream mapping</h2></div>
+      <article class="card">
+        <p class="body-copy">Map the two speaker channels that should drive VAD, transcription, and the auto cut. Channel indices are taken from the uploaded source files after probing.</p>
+        <div id="channelMapping"></div>
+        <button id="saveChannelsBtn" type="button" class="primary" disabled>Save channel mapping</button>
+        <button id="startProcessBtn" type="button" class="primary" style="display:none;margin-left:12px">Start processing</button>
+      </article>
+
+      <div class="section-head"><span class="sec-num">06</span><h2>Processing status</h2></div>
+      <div id="processView" class="processing-view" hidden>
+        <p class="processing-summary" id="processingSummary"></p>
+        <div id="pipelineTable"></div>
+        <p id="processActions" style="margin-top:18px"></p>
+      </div>
+    </section>
+
+    <section id="usersView" hidden>
+      <div class="grid g2">
+        <article class="card">
+          <h3>Add user</h3>
+          <form id="userForm">
+            <div class="field"><label for="newUsername">Username</label><input id="newUsername" required autocomplete="off"></div>
+            <div class="field"><label for="newDisplayName">Display name</label><input id="newDisplayName" required></div>
+            <div class="field"><label for="newPassword">Password</label><input id="newPassword" type="password" minlength="8" required autocomplete="new-password"></div>
+            <div class="field"><label for="newRole">Authorisation</label><select id="newRole"><option value="reviewer">Reviewer</option><option value="admin">Admin</option></select></div>
+            <button type="submit" class="primary">Add user</button>
+          </form>
+        </article>
+        <article class="card">
+          <h3>Authorised users</h3>
+          <div id="userList" class="mono-note">Loading users…</div>
+        </article>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/web/app.js"></script>
+</body>
+</html>

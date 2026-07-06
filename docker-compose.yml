@@ -1,0 +1,66 @@
+# AUTOEDIT canonical deployment — host-networked app behind Nginx Proxy Manager
+#
+# NPM terminates TLS for https://ingest.peteflix.uk and proxies to
+# http://192.168.50.50:8010.  AUTOEDIT uses Peter's existing central MySQL
+# server; do not add or start an autoedit-mysql service for production.
+#
+# Secrets must be provided by the shell, Unraid template, or another secret
+# store before `docker compose up` / `docker compose config` is run.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DATA_ROOT: /data
+      PORT: "8010"
+
+      # Public access/auth. TLS is handled by Nginx Proxy Manager.
+      PUBLIC_DOMAIN: ingest.peteflix.uk
+      ALLOWED_ORIGINS: https://ingest.peteflix.uk,http://192.168.50.50:8010
+      AUTH_ENABLED: "true"
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in deployment secrets}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:?set OPERATOR_PASSWORD in deployment secrets}
+      OPERATOR_USERNAME: ${OPERATOR_USERNAME:-peter}
+      OPERATOR_DISPLAY_NAME: ${OPERATOR_DISPLAY_NAME:-Peter}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-autoedit_session}
+      SESSION_COOKIE_SECURE: "true"
+      LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-5}
+      LOGIN_LOCKOUT_SECONDS: ${LOGIN_LOCKOUT_SECONDS:-300}
+
+      # Canonical central MySQL target. No local mysql/mariadb service belongs here.
+      DB_HOST: 192.168.50.50
+      DB_PORT: "3306"
+      DB_NAME: autoedit
+      DB_USER: autoedit
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deployment secrets}
+
+      # Local AI services. Keep mock backends explicit until real implementations land.
+      OLLAMA_BASE_URL: http://192.168.50.50:11434
+      LLM_MODEL: ${LLM_MODEL:-gemma4:12b-q4-68k}
+      # These backends are intentionally pinned to mock until real faster-whisper
+      # and diarization implementations are wired and tested. Do not allow stale
+      # .env values to make the deployment claim production AI behavior.
+      WHISPER_BACKEND: mock
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      DIARIZE_BACKEND: mock
+
+      # Media/runtime settings. Intel VAAPI is the verified hardware path in
+      # this container; QSV advertises codecs but fails MFX session creation.
+      UPLOAD_MAX_CHUNK_BYTES: ${UPLOAD_MAX_CHUNK_BYTES:-67108864}
+      # Pinned rather than ${PROXY_ENCODER:-...} because Docker Compose
+      # auto-loads the old remote .env and would otherwise keep libx264.
+      PROXY_ENCODER: h264_vaapi
+      PROXY_GOP: ${PROXY_GOP:-12}
+      PROXY_HEIGHT: ${PROXY_HEIGHT:-720}
+      PROXY_CRF: ${PROXY_CRF:-20}
+      PROXY_LOW_HEIGHT: ${PROXY_LOW_HEIGHT:-360}
+      PROXY_LOW_CRF: ${PROXY_LOW_CRF:-26}
+      VAD_DEFAULT_HANGOVER_MS: ${VAD_DEFAULT_HANGOVER_MS:-300}
+      CUT_MIN_SHOT_MS: ${CUT_MIN_SHOT_MS:-250}
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - /mnt/user/automulticam:/data
+      - /mnt/user/automulticam/luts:/data/luts

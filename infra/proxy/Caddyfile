@@ -16,6 +16,11 @@ https://{$PUBLIC_DOMAIN} {
 		X-Frame-Options DENY
 	}
 
+	# Match the app-level UPLOAD_MAX_CHUNK_BYTES default; override in deployment if needed.
+	request_body {
+		max_size {$UPLOAD_MAX_BODY_SIZE:64MB}
+	}
+
 	# ACME challenge handling is owned by Caddy. Do not serve DATA_ROOT here.
 	reverse_proxy {$APP_UPSTREAM:http://app:8000} {
 		header_up X-Forwarded-Proto {scheme}

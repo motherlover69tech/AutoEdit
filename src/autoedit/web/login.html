@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voices · AUTOEDIT — Sign in</title>
+  <link rel="stylesheet" href="/web/styles.css">
+</head>
+<body class="login-page">
+  <section class="login-box" id="loginBox">
+    <p class="eyebrow">Voices Media · AUTOEDIT</p>
+    <h1>Sign in.</h1>
+    <p class="lede" style="font-size:15px;margin-top:10px">Enter your password, then your username. The configured operator account is <span class="mono">peter</span>.</p>
+    <form id="loginForm" autocomplete="on">
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required autofocus autocomplete="current-password">
+      </div>
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" value="peter" placeholder="peter / reviewer username" autocomplete="username">
+      </div>
+      <div class="field">
+        <label for="displayName">Display name</label>
+        <input id="displayName" name="display_name" type="text" value="Peter" required autocomplete="name">
+      </div>
+      <button type="submit" class="primary" id="submitBtn">Sign in</button>
+      <p class="error" id="error" hidden>Invalid credentials. Try again.</p>
+    </form>
+  </section>
+  <script>
+    const form = document.getElementById('loginForm');
+    const error = document.getElementById('error');
+    const box = document.getElementById('loginBox');
+    const submitBtn = document.getElementById('submitBtn');
+    const params = new URLSearchParams(window.location.search);
+    const next = params.get('next') || '/';
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      box.classList.remove('shake');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Signing in…';
+      const username = document.getElementById('username').value.trim();
+      const payload = {
+        password: document.getElementById('password').value,
+        display_name: document.getElementById('displayName').value.trim() || 'Operator',
+      };
+      if (username) payload.username = username;
+      try {
+        const res = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          window.location.href = next;
+          return;
+        }
+        error.textContent = res.status === 429 ? 'Too many attempts. Wait and try again.' : 'Invalid credentials. Try again.';
+        error.hidden = false;
+        box.classList.add('shake');
+      } catch (_err) {
+        error.textContent = 'Login request failed. Check the connection.';
+        error.hidden = false;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Sign in';
+      }
+    });
+  </script>
+</body>
+</html>

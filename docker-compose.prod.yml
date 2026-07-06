@@ -1,0 +1,41 @@
+# DEPRECATED / NON-CANONICAL
+#
+# Peter's AUTOEDIT deployment uses docker-compose.yml: a host-networked app
+# behind Nginx Proxy Manager, with central MySQL at 192.168.50.50:3306.
+# Keep this file only as a historical bridge-network example. Do not use it for
+# the production Unraid deployment unless it is first reconciled with
+# docs/plans/central-mysql-deployment-and-docs-remediation.md.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      DATA_ROOT: /data
+      PORT: "8000"
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-ingest.peteflix.uk}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://ingest.peteflix.uk}
+      AUTH_ENABLED: "true"
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in deployment secrets}
+      OPERATOR_PASSWORD: ${OPERATOR_PASSWORD:?set OPERATOR_PASSWORD in deployment secrets}
+      OPERATOR_USERNAME: ${OPERATOR_USERNAME:-peter}
+      OPERATOR_DISPLAY_NAME: ${OPERATOR_DISPLAY_NAME:-Peter}
+      SESSION_COOKIE_SECURE: "true"
+      DB_HOST: 192.168.50.50
+      DB_PORT: "3306"
+      DB_NAME: autoedit
+      DB_USER: autoedit
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deployment secrets}
+      OLLAMA_BASE_URL: http://192.168.50.50:11434
+      LLM_MODEL: ${LLM_MODEL:-gemma4:12b-q4-68k}
+      WHISPER_BACKEND: ${WHISPER_BACKEND:-mock}
+      DIARIZE_BACKEND: ${DIARIZE_BACKEND:-mock}
+      UPLOAD_MAX_CHUNK_BYTES: ${UPLOAD_MAX_CHUNK_BYTES:-67108864}
+      PROXY_ENCODER: ${PROXY_ENCODER:-h264_vaapi}
+    ports:
+      - "8010:8000"
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - /mnt/user/automulticam:/data
+      - /mnt/user/automulticam/luts:/data/luts

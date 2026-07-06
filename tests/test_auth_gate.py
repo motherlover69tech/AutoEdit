@@ -127,3 +127,32 @@ def test_origin_locked_to_public_domain(auth_client):
 
     good_origin = client.get("/health", headers={"Origin": "https://autoedit.example.com"})
     assert good_origin.status_code == 200
+
+
+def test_extra_allowed_origin_passes(tmp_path: Path):
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    run_migrations(engine)
+    app = create_app(
+        engine=engine,
+        data_root=tmp_path,
+        auth_enabled=True,
+        operator_password="correct-password",
+        session_secret="test-session-secret",
+        public_domain="autoedit.example.com",
+        allowed_origins="http://192.168.50.50:8010",
+        session_cookie_secure=False,
+    )
+    client = TestClient(app)
+
+    direct_origin = client.get("/health", headers={"Origin": "http://192.168.50.50:8010"})
+    assert direct_origin.status_code == 200
+
+    public_origin = client.get("/health", headers={"Origin": "https://autoedit.example.com"})
+    assert public_origin.status_code == 200
+
+    bad_origin = client.get("/health", headers={"Origin": "https://evil.example"})
+    assert bad_origin.status_code == 403

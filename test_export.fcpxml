@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fcpxml version="1.9">
+    <resources>
+        <format id="r1" frameDuration="1/25s" width="1920" height="1080" />
+        <asset id="a1" name="Guest" format="r1" start="0s" duration="9999s" hasVideo="1" hasAudio="1" src="guest.mp4" />
+        <asset id="a2" name="Presenter" format="r1" start="0s" duration="9999s" hasVideo="1" hasAudio="1" src="presenter.mp4" />
+        <asset id="a3" name="Wide" format="r1" start="0s" duration="9999s" hasVideo="1" hasAudio="1" src="wide.mp4" />
+    </resources>
+    <library>
+        <event name="AUTOEDIT Export">
+            <project name="Rough Cut">
+                <sequence format="r1" duration="575/25s">
+                    <spine>
+                        <asset-clip ref="a3" offset="0/25s" start="0/25s" duration="75/25s" />
+                        <marker start="12/25s" duration="1/25s" value="[note] Peter: Establishing shot looks good" />
+                        <asset-clip ref="a2" offset="75/25s" start="0/25s" duration="125/25s" />
+                        <marker start="112/25s" duration="1/25s" value="[cut_suggestion] Peter: Check audio level" />
+                        <asset-clip ref="a3" offset="200/25s" start="77/25s" duration="50/25s" />
+                        <marker start="225/25s" duration="1/25s" value="[cut_suggestion] Guest Reviewer: Stay on presenter" />
+                        <asset-clip ref="a1" offset="250/25s" start="0/25s" duration="100/25s" />
+                        <marker start="300/25s" duration="1/25s" value="[note] Peter: Guest answer is strong" />
+                        <asset-clip ref="a2" offset="350/25s" start="128/25s" duration="150/25s" />
+                        <marker start="425/25s" duration="1/25s" value="[note] Peter: Good energy here" />
+                        <asset-clip ref="a3" offset="500/25s" start="130/25s" duration="75/25s" />
+                        <marker start="538/25s" duration="1/25s" value="[note] Guest Reviewer: Nice closing shot" />
+                    </spine>
+                </sequence>
+            </project>
+        </event>
+    </library>
+</fcpxml>

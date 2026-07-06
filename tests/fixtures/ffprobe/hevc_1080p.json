@@ -1,0 +1,39 @@
+{
+  "streams": [
+    {
+      "index": 0,
+      "codec_name": "hevc",
+      "codec_long_name": "H.265 / HEVC (High Efficiency Video Coding)",
+      "codec_type": "video",
+      "width": 1920,
+      "height": 1080,
+      "r_frame_rate": "24000/1001",
+      "avg_frame_rate": "24000/1001",
+      "duration_ts": 600600,
+      "duration": "20.020000",
+      "pix_fmt": "yuv420p",
+      "level": 120,
+      "profile": "Main"
+    },
+    {
+      "index": 1,
+      "codec_name": "aac",
+      "codec_long_name": "AAC (Advanced Audio Coding)",
+      "codec_type": "audio",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "sample_rate": "48000",
+      "duration_ts": 960960,
+      "duration": "20.020000"
+    }
+  ],
+  "format": {
+    "filename": "source/angleC.mp4",
+    "nb_streams": 2,
+    "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+    "format_long_name": "QuickTime / MOV",
+    "duration": "20.020000",
+    "size": "31457280",
+    "bit_rate": "12570600"
+  }
+}

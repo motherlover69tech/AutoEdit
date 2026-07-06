@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voices · AUTOEDIT Review Player</title>
+    <link rel="stylesheet" href="/web/styles.css" />
+  </head>
+  <body>
+    <main class="player-shell">
+      <!-- Processing interstitial (shown when project not ready) -->
+      <div id="playerProcessing" class="player-processing" hidden>
+        <header class="player-header">
+          <div>
+            <a class="brandmark" href="/">Voices<span class="dot">.</span></a>
+            <p class="eyebrow">AUTOEDIT · Processing</p>
+            <h1>Preparing your edit.</h1>
+          </div>
+        </header>
+        <p class="processing-summary" id="playerProcessingSummary"></p>
+        <div id="playerPipelineTable"></div>
+        <p id="playerProcessingActions" style="margin-top:18px"></p>
+      </div>
+
+      <!-- Player shell (shown when ready) -->
+      <div id="playerShell">
+      <header class="player-header">
+        <div>
+          <a class="brandmark" href="/">Voices<span class="dot">.</span></a>
+          <p class="eyebrow">AUTOEDIT · Review</p>
+          <h1>Review player.</h1>
+        </div>
+        <div class="player-controls">
+          <div class="current-angle" id="currentAngle">
+            <span class="angle-dot" id="angleDot" aria-hidden="true"></span>
+            <span class="angle-label-text" id="angleLabel">—</span>
+          </div>
+          <button id="lutToggle" type="button" class="quiet" style="display:none">LUT OFF</button>
+          <label class="ui-label" style="margin:0;width:160px">
+            Quality
+            <select id="qualitySelect" aria-label="Playback quality">
+              <option value="proxy" selected>Proxy</option>
+              <option value="proxy_low">Proxy low</option>
+            </select>
+          </label>
+          <button id="backToAutoButton" type="button" class="ghost">Back to auto</button>
+          <div class="sync-nudge" id="syncNudge" style="display:none;align-items:center;gap:6px">
+            <span class="ui-label" style="margin:0">Sync</span>
+            <button id="syncMinus" type="button" class="quiet btn-sm" title="Nudge earlier">−100ms</button>
+            <span id="syncOffsetDisplay" class="mono-note" style="min-width:60px;text-align:center">0ms</span>
+            <button id="syncPlus" type="button" class="quiet btn-sm" title="Nudge later">+100ms</button>
+            <button id="syncSave" type="button" class="ghost btn-sm">Save</button>
+          </div>
+        </div>
+      </header>
+
+      <section class="video-stage" aria-label="Multicam video stage">
+        <video id="videoA" class="program-video is-visible" muted playsinline preload="auto"></video>
+        <video id="videoB" class="program-video" muted playsinline preload="auto"></video>
+        <canvas id="lutCanvas" class="lut-canvas" aria-label="LUT-graded output"></canvas>
+        <div id="statusText" class="status-text" role="status">Loading player…</div>
+      </section>
+
+      <audio id="programAudio" class="program-audio" controls preload="auto"></audio>
+
+      <section class="timeline-section" aria-label="Metadata timeline">
+        <div class="timeline-header">
+          <h2>Timeline</h2>
+          <span class="timeline-time" id="timelineTime">0:00 / 0:00</span>
+        </div>
+        <div class="timeline-lanes" id="timelineLanes">
+          <div class="timeline-lane" data-lane="cdl">
+            <div class="lane-label">Angle</div>
+            <div class="lane-track" id="cdlLane"></div>
+          </div>
+          <div class="timeline-lane" data-lane="topics">
+            <div class="lane-label">Topics</div>
+            <div class="lane-track" id="topicLane"></div>
+          </div>
+          <div class="timeline-lane" data-lane="loudness" id="loudnessLane">
+            <div class="lane-label">Energy</div>
+            <div class="lane-track" id="waveformTrack"></div>
+          </div>
+          <div class="timeline-lane" data-lane="notes">
+            <div class="lane-label">Notes</div>
+            <div class="lane-track" id="notesLane"></div>
+          </div>
+        </div>
+        <div class="timeline-scrubber" id="timelineScrubber" role="slider" tabindex="0" aria-label="Timeline position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="scrubber-playhead" id="scrubberPlayhead"></div>
+        </div>
+      </section>
+
+      <div class="grid g2">
+        <section class="angle-panel" aria-label="Angle override controls">
+          <h2>Angles</h2>
+          <p class="mono-note">Use manual override for a live cut. Back to auto returns to the generated CDL.</p>
+          <div id="angleButtons" class="angle-buttons"></div>
+        </section>
+
+        <section class="notes-panel" aria-label="Review notes">
+          <h2>Notes</h2>
+          <form id="noteForm" class="note-form" autocomplete="off">
+            <textarea id="noteBody" placeholder="Add a note at current playhead…" rows="2" maxlength="10000" required></textarea>
+            <div class="note-form-row">
+              <select id="noteKind" aria-label="Note kind">
+                <option value="note">Note</option>
+                <option value="cut_suggestion">Cut suggestion</option>
+              </select>
+              <button type="submit" id="noteSubmit" class="primary">Add note</button>
+            </div>
+          </form>
+          <ul id="noteList" class="note-list"></ul>
+        </section>
+      </div>
+
+      <!-- LUT Management Panel -->
+      <section class="lut-panel" aria-label="LUT management">
+        <h2>LUTs</h2>
+        <p class="mono-note">Upload .cube LUT files and assign them to specific angles. Default LUT applies to all angles without an assigned LUT.</p>
+        
+        <div class="lut-section">
+          <h3>Upload LUT</h3>
+          <div class="field">
+            <label for="lutFile">Select .cube file</label>
+            <input type="file" id="lutFile" accept=".cube">
+          </div>
+          <div id="lutUploadStatus" class="mono-note"></div>
+        </div>
+
+        <div class="lut-section">
+          <h3>Available LUTs</h3>
+          <div id="lutList" class="lut-list"></div>
+        </div>
+
+        <div class="lut-section">
+          <h3>Default LUT (applies to all angles)</h3>
+          <div id="defaultLutDisplay" class="mono-note">None</div>
+          <div class="field" style="margin-top:8px">
+            <label for="defaultLutSelect">Set default LUT</label>
+            <select id="defaultLutSelect" disabled>
+              <option value="">— Select a LUT —</option>
+            </select>
+          </div>
+          <div class="lut-actions">
+            <button id="activateDefaultLut" type="button" class="primary" disabled>Activate</button>
+            <button id="deactivateDefaultLut" type="button" class="ghost" disabled style="margin-left:8px">Deactivate</button>
+          </div>
+        </div>
+
+        <div class="lut-section">
+          <h3>Per-Angle LUT Assignments</h3>
+          <div id="angleLutAssignments"></div>
+        </div>
+      </section>
+
+      <!-- Cut Parameters Panel -->
+      <section class="cut-params-panel" aria-label="Cut engine parameters">
+        <h2>Cut Parameters</h2>
+        <p class="mono-note">Direct is the baseline: cut as soon as one speaker becomes active, cut wide for overlap or silence. Use Looser only if the direct cut feels twitchy.</p>
+        <div class="lut-actions" style="margin-bottom:12px">
+          <button id="cutPresetDirect" type="button" class="ghost btn-sm">Direct preset</button>
+          <button id="cutPresetLooser" type="button" class="ghost btn-sm" style="margin-left:8px">Looser preset</button>
+        </div>
+        
+        <div class="grid g2">
+          <div class="field">
+            <label for="cutOverlapToWide">Overlap → Wide</label>
+            <select id="cutOverlapToWide">
+              <option value="true">Yes (cut to wide on overlap)</option>
+              <option value="false">No (stay on speaker)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="cutMinShotMs">Min shot duration (ms)</label>
+            <input type="number" id="cutMinShotMs" value="250" min="1" step="50">
+          </div>
+          <div class="field">
+            <label for="cutLeadInMs">Lead-in (ms)</label>
+            <input type="number" id="cutLeadInMs" value="0" min="0" step="10">
+          </div>
+          <div class="field">
+            <label for="cutTailMs">Tail (ms)</label>
+            <input type="number" id="cutTailMs" value="0" min="0" step="10">
+          </div>
+          <div class="field">
+            <label for="cutSilenceBehaviour">Silence behaviour</label>
+            <select id="cutSilenceBehaviour">
+              <option value="wide" selected>Cut to wide</option>
+              <option value="hold">Hold last angle</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="cutWideIntervalMs">Relief wide interval (ms, 0=off)</label>
+            <input type="number" id="cutWideIntervalMs" value="0" min="0" step="1000">
+          </div>
+        </div>
+        <div class="lut-actions">
+          <button id="regenerateCutBtn" type="button" class="primary">Regenerate Cut</button>
+          <span id="cutRegenStatus" class="mono-note" style="margin-left:12px"></span>
+        </div>
+      </section>
+      </div><!-- end playerShell -->
+    </main>
+
+    <script type="module" src="/web/player.js?v=4"></script>
+  </body>
+</html>

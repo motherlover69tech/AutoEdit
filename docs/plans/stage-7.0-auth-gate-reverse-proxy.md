@@ -4,11 +4,15 @@
 
 **Goal:** Ensure nobody reaches the app or media endpoints without TLS and an authenticated session, while keeping `/health` and ACME challenge paths public.
 
-**Architecture:** Add a FastAPI auth layer with signed httpOnly session cookies, shared operator-password login for the first deploy, reviewer display-name persistence in the session, brute-force login lockout, and explicit origin checks tied to `PUBLIC_DOMAIN`. Add a Caddy reverse-proxy template for TLS termination and HTTP→HTTPS redirect. Keep the temporary MySQL dev container non-canonical.
+**Architecture:** Add a FastAPI auth layer with signed httpOnly session cookies, shared operator-password login for the first deploy, reviewer display-name persistence in the session, brute-force login lockout, and explicit origin checks tied to `PUBLIC_DOMAIN`. Peter's active deployment uses Nginx Proxy Manager for TLS termination and HTTP→HTTPS redirect. Keep the temporary MySQL dev container non-canonical.
 
-**Tech Stack:** Python 3.12, FastAPI middleware/dependencies, SQLAlchemy-backed API, stdlib HMAC session signing, pytest/TestClient, Caddy reverse proxy.
+**Tech Stack:** Python 3.12, FastAPI middleware/dependencies, SQLAlchemy-backed API, stdlib HMAC session signing, pytest/TestClient, Nginx Proxy Manager.
 
 ---
+
+## Current status
+
+Backend auth/session/rate-limit/origin behavior is implemented and live-deployed. Nginx Proxy Manager terminates TLS for `ingest.peteflix.uk` and proxies to the host-networked app at `192.168.50.50:8010`. Public `/health` returns 200, protected routes return 401 without a session, login sets a secure httpOnly cookie, and `/data` is not exposed. Stage 7.0 is complete for the current Unraid deployment.
 
 ## Source requirements
 
@@ -18,11 +22,11 @@ From `docs/source/multicam_autoedit_spec.md`:
 - Stage 7.0: proxy container terminates HTTPS for `PUBLIC_DOMAIN`; login endpoint; signed httpOnly cookies; rate-limit auth/upload; CORS locked to `PUBLIC_DOMAIN`.
 - Definition of Done: all routes except health + ACME require session; TLS cert provisions/plain HTTP redirects; brute-force lockout after N failed logins; reviewer display name can be attached to later notes.
 
-## Non-goals for this stage
+## Current non-goals / remaining boundary
 
-- No upload/media streaming endpoint yet; future stages must inherit the auth dependency/middleware.
-- No per-user database accounts yet; single shared operator password is acceptable per spec minimum.
-- No public deployment until `PUBLIC_DOMAIN`, `SESSION_SECRET`, and operator password are configured.
+- Backend auth, upload protection, authenticated media streaming, and the NPM/TLS deployment are complete for Peter's Unraid instance.
+- No per-user database accounts yet; single shared operator password remains acceptable per spec minimum.
+- Keep `SESSION_SECRET`, operator password, and DB password configured outside the repo.
 
 ## Task 1: Write backend auth gate tests
 
@@ -148,23 +152,23 @@ env -u VIRTUAL_ENV uv run pytest tests/test_auth_gate.py -q
 env -u VIRTUAL_ENV uv run pytest -q
 ```
 
-## Task 6: Add reverse proxy config template
+## Task 6: Configure Nginx Proxy Manager route
 
-**Objective:** Document the TLS boundary without deploying prematurely.
+**Objective:** Document and verify the TLS boundary without serving `/data` directly.
 
 **Files:**
-- Create: `infra/proxy/Caddyfile`
-- Create: `infra/proxy/README.md`
+- Modify: `docs/DEPLOYMENT.md`
+- Keep: `infra/proxy/` as historical/non-canonical reference only unless Peter explicitly revives Caddy.
 
-**Caddy behavior:**
+**NPM behavior:**
 
-- `http://PUBLIC_DOMAIN` redirects to HTTPS.
-- `https://PUBLIC_DOMAIN` terminates TLS and proxies to app container.
+- `http://ingest.peteflix.uk` redirects to HTTPS.
+- `https://ingest.peteflix.uk` terminates TLS and proxies to `192.168.50.50:8010`.
 - Preserve `X-Forwarded-*` headers.
 - Do not serve `/data` statically.
 - Optional proxy-level rate limits can be added later; backend lockout remains required.
 
-**Manual gate:** TLS cert provisioning can only be marked done when `PUBLIC_DOMAIN` exists and Caddy is deployed on Unraid/reverse-proxy stack.
+**Manual gate:** TLS cert provisioning can only be marked done when the NPM route is live and `/health`, protected-route `401`, login cookie, HTTP→HTTPS redirect, and no direct `/data` exposure have been verified.
 
 ## Task 7: Update continuity docs and commit
 
@@ -177,8 +181,7 @@ env -u VIRTUAL_ENV uv run pytest -q
 
 **Status rules:**
 
-- Mark Stage 7.0 `in_progress` if backend tests pass but TLS deployment/manual proxy gate is still pending.
-- Mark Stage 7.0 `done` only after backend tests pass and TLS cert/HTTP redirect/proxy behavior is verified on the target deployment.
+- Mark Stage 7.0 `done` for Peter's current Unraid/NPM deployment. If a future deployment target changes, re-run the same health/auth/login/redirect/no-`/data` manual gate before marking that new target complete.
 
 **Final verification commands:**
 

@@ -81,6 +81,7 @@ def create_upload(
     role: AngleRole,
     total_bytes: int,
     total_chunks: int,
+    chunk_bytes: int | None = None,
 ) -> dict[str, Any]:
     if get_project(engine, project_id) is None:
         raise UploadNotFoundError("project not found")
@@ -89,6 +90,8 @@ def create_upload(
         raise UploadError("total_bytes must be positive")
     if total_chunks <= 0:
         raise UploadError("total_chunks must be positive")
+    if chunk_bytes is not None and chunk_bytes <= 0:
+        raise UploadError("chunk_bytes must be positive")
 
     upload_id = new_ulid()
     upload_dir = upload_root(data_root, project_id, upload_id)
@@ -101,6 +104,7 @@ def create_upload(
         "role": role,
         "total_bytes": total_bytes,
         "total_chunks": total_chunks,
+        "chunk_bytes": chunk_bytes,
     }
     _write_metadata(upload_dir, metadata)
     return {**metadata, "highest_contiguous_chunk": -1}
@@ -146,6 +150,14 @@ def write_chunk(data_root: str | Path, upload_id: str, index: int, content: byte
     tmp_path = chunks_dir / f"{index:08d}.part.tmp"
     tmp_path.write_bytes(content)
     tmp_path.replace(_part_path(upload_dir, index))
+
+    chunk_bytes = metadata.get("chunk_bytes")
+    if chunk_bytes:
+        assembled_path = upload_dir / "assembled.tmp"
+        offset = index * int(chunk_bytes)
+        with assembled_path.open("r+b" if assembled_path.exists() else "w+b") as assembled:
+            assembled.seek(offset)
+            assembled.write(content)
     return get_upload_status(data_root, upload_id)
 
 
@@ -154,7 +166,7 @@ def complete_upload(
     data_root: str | Path,
     *,
     upload_id: str,
-    expected_sha256: str,
+    expected_sha256: str | None = None,
     expected_total_bytes: int,
 ) -> dict[str, Any]:
     upload_dir, metadata = find_upload(data_root, upload_id)
@@ -164,22 +176,28 @@ def complete_upload(
         raise UploadError("byte count mismatch")
 
     assembled_path = upload_dir / "assembled.tmp"
-    digest = hashlib.sha256()
-    total_bytes = 0
-    with assembled_path.open("wb") as out_file:
-        for index in range(metadata["total_chunks"]):
-            part = _part_path(upload_dir, index)
-            chunk = part.read_bytes()
-            total_bytes += len(chunk)
-            digest.update(chunk)
-            out_file.write(chunk)
+    if not assembled_path.is_file():
+        with assembled_path.open("wb") as out_file:
+            for index in range(metadata["total_chunks"]):
+                part = _part_path(upload_dir, index)
+                with part.open("rb") as in_file:
+                    shutil.copyfileobj(in_file, out_file, length=1024 * 1024)
 
+    total_bytes = assembled_path.stat().st_size
     if total_bytes != expected_total_bytes:
         shutil.rmtree(upload_dir, ignore_errors=True)
         raise UploadError("byte count mismatch")
-    if digest.hexdigest() != expected_sha256:
-        shutil.rmtree(upload_dir, ignore_errors=True)
-        raise UploadError("sha256 mismatch")
+
+    computed_sha256 = None
+    if expected_sha256 is not None:
+        digest = hashlib.sha256()
+        with assembled_path.open("rb") as in_file:
+            for chunk in iter(lambda: in_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+        computed_sha256 = digest.hexdigest()
+        if computed_sha256 != expected_sha256:
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            raise UploadError("sha256 mismatch")
 
     project_dir = project_root(data_root, metadata["project_id"])
     source_dir = project_dir / "source"
@@ -221,4 +239,5 @@ def complete_upload(
         "width": row.width,
         "height": row.height,
         "vcodec": row.vcodec,
+        "sha256": computed_sha256,
     }

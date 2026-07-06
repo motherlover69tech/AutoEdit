@@ -18,6 +18,9 @@ from sqlalchemy import (
     func,
 )
 
+# BigInteger that works as autoincrement on both SQLite (as INTEGER) and MySQL.
+BigIntPK = Integer().with_variant(BigInteger(), "mysql")
+
 metadata = MetaData()
 
 users = Table(
@@ -82,7 +85,7 @@ audio_channels = Table(
 speaking_intervals = Table(
     "speaking_intervals",
     metadata,
-    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("id", BigIntPK, primary_key=True, autoincrement=True),
     Column("channel_id", String(26), ForeignKey("audio_channels.id"), nullable=False),
     Column("start_ms", BigInteger, nullable=False),
     Column("end_ms", BigInteger, nullable=False),
@@ -94,7 +97,7 @@ speaking_intervals = Table(
 transcript_segments = Table(
     "transcript_segments",
     metadata,
-    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("id", BigIntPK, primary_key=True, autoincrement=True),
     Column("project_id", String(26), ForeignKey("projects.id"), nullable=False),
     Column("channel_id", String(26), ForeignKey("audio_channels.id"), nullable=False),
     Column("start_ms", BigInteger, nullable=False),
@@ -117,7 +120,7 @@ topics = Table(
 topic_spans = Table(
     "topic_spans",
     metadata,
-    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("id", BigIntPK, primary_key=True, autoincrement=True),
     Column("topic_id", String(26), ForeignKey("topics.id"), nullable=False),
     Column("project_id", String(26), ForeignKey("projects.id"), nullable=False),
     Column("start_ms", BigInteger, nullable=False),
@@ -143,7 +146,7 @@ cuts = Table(
 notes = Table(
     "notes",
     metadata,
-    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("id", BigIntPK, primary_key=True, autoincrement=True),
     Column("project_id", String(26), ForeignKey("projects.id"), nullable=False),
     Column("cut_id", String(26), ForeignKey("cuts.id")),
     Column("t_ms", BigInteger, nullable=False),

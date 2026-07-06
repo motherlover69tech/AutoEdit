@@ -318,7 +318,7 @@ footer.foot .brandmark{font-family:var(--serif);font-size:20px;color:var(--t-hi)
     </div>
     <div class="spec">
       <div class="label">Data / labels · IBM Plex Mono</div>
-      <div class="demo mono" style="font-size:15px;color:var(--t-hi);letter-spacing:.04em">00:14:22:08 &nbsp; PRESENTER &nbsp; VAD −38dB &nbsp; min_shot 1200ms</div>
+      <div class="demo mono" style="font-size:15px;color:var(--t-hi);letter-spacing:.04em">00:14:22:08 &nbsp; PRESENTER &nbsp; VAD −38dB &nbsp; direct min_shot 250ms</div>
     </div>
 
     <h4 class="t">Type scale</h4>
@@ -505,7 +505,7 @@ footer.foot .brandmark{font-family:var(--serif);font-size:20px;color:var(--t-hi)
     <p class="body">The player (Section 03) full-bleed, with a collapsible right rail: notes list (grouped by reviewer), topic index (click to jump), and the conciseness report. The rail never covers the frame — it pushes the player left. This is where reviewers spend their time, so it carries the most polish and the least chrome.</p>
 
     <h3 class="t">Screen 05 · Refine &amp; export</h3>
-    <p class="body">Two halves. Left, the auto-edit parameters as labelled mono controls (min_shot, lead-in, overlap→wide, periodic wide) with a "Regenerate" that re-cuts live. Below them, a natural-language box — "1 minute on the immigration topic" — that produces a new sub-edit as its own version. Right, the cut versions list (rough / themed / social), each with an Export button that runs the CDL validator first and only then writes FCPXML. A blocked export shows the exact failing clip, never a blank file.</p>
+    <p class="body">Two halves. Left, the auto-edit parameters as labelled mono controls (Direct preset, Looser preset, min_shot, lead-in, tail, overlap→wide, silence→wide, relief wide) with a "Regenerate" that re-cuts live. The Direct preset is the baseline: cut on the speaker edge, wide for overlap/silence; Looser is an explicit fallback for twitchy material. Below them, a natural-language box — "1 minute on the immigration topic" — that produces a new sub-edit as its own version. Right, the cut versions list (rough / themed / social), each with an Export button that runs the CDL validator first and only then writes FCPXML. A blocked export shows the exact failing clip, never a blank file.</p>
     <div class="grid g2">
       <div class="dd do"><div class="h">Do</div>Make every parameter a labelled mono control with its live value shown. Keep "Regenerate" reversible — versions are cheap, nothing is destructive. Validate before export and explain any failure in one sentence.</div>
       <div class="dd dont"><div class="h">Don't</div>Don't let export run on an unvalidated CDL. Don't hide which source files an export references. Don't bake the LUT into anything — it is preview-only.</div>

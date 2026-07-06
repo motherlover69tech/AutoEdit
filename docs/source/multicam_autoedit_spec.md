@@ -71,7 +71,7 @@ All services run on the Unraid host. An implementer may collapse several into on
 
 Because the player is reachable from the public internet, the following are **mandatory** and are themselves a build module's worth of work (folded into Module 7, Stage 7.0, as a prerequisite gate).
 
-- **TLS everywhere.** The `proxy` container terminates HTTPS (Caddy auto-provisions Let's Encrypt certs given a domain; parameter `PUBLIC_DOMAIN`). No plaintext HTTP except the ACME challenge and an HTTP→HTTPS redirect.
+- **TLS everywhere.** Current Peter deployment terminates HTTPS in Nginx Proxy Manager for `ingest.peteflix.uk` and proxies to the host-networked app on `192.168.50.50:8010`. Generic deployments may use another reverse proxy, but this repo's active runbook is NPM, not Caddy. No plaintext HTTP except ACME/health and HTTP→HTTPS redirect.
 - **Authentication required for every route except the health check and ACME.** Minimum: a single shared operator password plus per-reviewer display-name; recommended: per-user accounts with bcrypt-hashed passwords in a `users` table and signed, httpOnly session cookies (secret `SESSION_SECRET`). OAuth/SSO is out of scope but the auth layer should not preclude it.
 - **Rate limiting & brute-force protection** on the auth and upload endpoints (e.g. fail2ban-style lockout, or proxy-level rate limits).
 - **No media served without an authenticated session.** Proxy media (`/data/.../proxy`) and source downloads must be behind auth — use signed, expiring URLs or a streaming endpoint that checks the session; never expose `/data` as a static directory.
@@ -223,7 +223,7 @@ created_at, started_at, finished_at
 
 ### 2.3 Configuration parameters (env)
 
-Defaults shown. All overridable per-deployment via env; threshold-class ones additionally per-project via `projects.config_json`.
+Defaults shown. All overridable per-deployment via env; threshold-class ones additionally per-project via `projects.config_json`. This source spec includes some aspirational architecture; the current implementation-status truth lives in `AI_HANDOFF.md` and deployment truth lives in `docs/DEPLOYMENT.md`.
 
 | Variable                  | Default                  | Purpose                                  |
 | ------------------------- | ------------------------ | ---------------------------------------- |
@@ -232,17 +232,17 @@ Defaults shown. All overridable per-deployment via env; threshold-class ones add
 | `DATA_ROOT`               | `/mnt/user/automulticam` | Array path for projects                  |
 | `DB_*`                    | (required)               | MySQL connection                         |
 | `REDIS_URL`               | `redis://redis:6379`     | Queue + sessions                         |
-| `LLM_BASE_URL`            | `http://llm:11434`       | Local model endpoint                     |
+| `OLLAMA_BASE_URL`         | `http://llm:11434`       | Local Ollama model endpoint              |
 | `LLM_MODEL`               | `qwen2.5:14b`            | Model for logging/generation             |
 | `WHISPER_BACKEND`         | `faster-whisper`         | or whisper.cpp / external                |
 | `WHISPER_MODEL`           | `small.en`               | CPU-realistic on no-GPU host             |
-| `PROXY_ENCODER`           | `libx264`                | or `h264_qsv`/`h264_nvenc` if HW present |
+| `PROXY_ENCODER`           | `h264_vaapi`             | Intel VAAPI hardware path; `libx264` software fallback; `h264_qsv` only after QSV is fixed |
 | `PROXY_GOP`               | `12`                     | Keyframe interval (frames) for seek perf |
 | `PROXY_HEIGHT`            | `720`                    | Main proxy height                        |
 | `PROXY_LOW_HEIGHT`        | `360`                    | Remote/low-bandwidth proxy height        |
-| `UPLOAD_CHUNK_MB`         | `8`                      | Chunk size for resumable upload          |
+| `UPLOAD_MAX_CHUNK_BYTES`  | `67108864`               | Max resumable-upload chunk size in bytes |
 | `VAD_DEFAULT_HANGOVER_MS` | `300`                    | Speech off-debounce                      |
-| `CUT_MIN_SHOT_MS`         | `1200`                   | Minimum time on any angle                |
+| `CUT_MIN_SHOT_MS`         | `250`                    | Direct-cut micro-guard; raise only to loosen twitchy edits |
 
 ### 2.4 Cut Decision List (CDL) — the master contract
 
@@ -271,7 +271,7 @@ The CDL is the single artifact the auto-cut engine produces (Module 6), the play
 
 ### 2.5 Job lifecycle
 
-Long-running work is dispatched to the worker via the queue. The API returns a job id immediately; the frontend polls `GET /jobs/:id` or subscribes via SSE. Every job updates `progress` and a human-readable `message`. Jobs are idempotent and resumable where possible (re-running transcription overwrites `transcript.json` atomically).
+Long-running work is currently executed in-process/background-thread style in the app. The queued worker lifecycle below is an architectural target for a future Redis/worker stage, not the current implementation. When that stage lands, the API should return a job id immediately; the frontend polls `GET /jobs/:id` or subscribes via SSE. Every job updates `progress` and a human-readable `message`. Jobs are idempotent and resumable where possible (re-running transcription overwrites `transcript.json` atomically).
 
 1. **created → ingesting:** chunks assembled, ffprobe metadata captured.
 2. **ingesting → processing:** sync, proxy encode, loudness, VAD, transcription, AI logging, initial rough cut — each a sub-job with its own progress.
@@ -315,7 +315,7 @@ A suggested whole-project order is in Appendix A. Within a module, stages are st
 - **Goal:** get three large files onto the array without timeout failures.
 - **Depends on:** 3.1.
 - **Inputs:** a created project.
-- **Build:** client splits each file into `UPLOAD_CHUNK_MB` parts; `POST /upload/:uploadId/chunk/:index` appends to a temp file; `GET /upload/:uploadId` returns highest contiguous chunk received (resume); `POST /upload/:uploadId/complete` validates byte count + client SHA-256, then moves the assembled file to `source/` and creates the `angles` row (no proxy yet).
+- **Build:** client splits each file into chunks no larger than `UPLOAD_MAX_CHUNK_BYTES`; `POST /upload/:uploadId/chunk/:index` appends to a temp file; `GET /upload/:uploadId` returns highest contiguous chunk received (resume); `POST /upload/:uploadId/complete` validates byte count + client SHA-256, then moves the assembled file to `source/` and creates the `angles` row (no proxy yet).
 - **Definition of Done:**
   - **Resilience test:** kill the connection mid-upload; resume; final file SHA matches original.
   - Concurrent upload of 3 files to one project works.
@@ -586,20 +586,24 @@ A suggested whole-project order is in Appendix A. Within a module, stages are st
   
   - single speaker active → that speaker's cam;
   - both active and `overlap_to_wide` → wide;
-  - neither active → `silence_behaviour` ('hold' last angle, or 'wide').
-    Apply `lead_in_ms`/`tail_ms` by shifting boundaries against raw speech edges. Resolve each shot to a clip: `angle_id`, `src_in_ms = timeline_in_ms − angle.sync_offset_ms`, `dur_ms`. **Snap every boundary to a whole frame** for the project fps before writing.
+  - neither active → wide by default (`silence_behaviour='wide'`), or optionally hold last angle.
+    The baseline method is **direct**: use the raw activity edges as the cut edges, with no intentional lead/tail delay. `lead_in_ms`, `tail_ms`, and higher `min_shot_ms` values are loosening controls only. Resolve each shot to a clip: `angle_id`, `src_in_ms = timeline_in_ms − angle.sync_offset_ms`, `dur_ms`. **Snap every boundary to a whole frame** for the project fps before writing.
 
 - **Rule parameters** (stored in `cuts.params_json`):
   
   | Param                  | Default | Effect                                              |
   | ---------------------- | ------- | --------------------------------------------------- |
-  | `min_shot_ms`          | 1200    | Never hold an angle shorter than this (anti-jitter) |
+  | `min_shot_ms`          | 250     | Tiny direct-cut guard against detector chatter; raise to loosen |
   | `overlap_to_wide`      | true    | Both speaking → cut to wide                         |
-  | `wide_interval_ms`     | 0       | If >0, periodically cut to wide around this value   |
+  | `wide_interval_ms`     | 0       | If >0, relief wide after long solo stretches around this cadence |
   | `wide_interval_jitter` | 0.3     | Randomness factor for the above                     |
-  | `lead_in_ms`           | 120     | Switch this long before a speaker starts            |
-  | `tail_ms`              | 200     | Hold after a speaker stops before switching         |
-  | `silence_behaviour`    | hold    | 'hold' or 'wide' on long silence                    |
+  | `lead_in_ms`           | 0       | Optional pre-roll before a speaker starts; keep 0 for direct cuts |
+  | `tail_ms`              | 0       | Optional hold after a speaker stops; keep 0 for direct cuts |
+  | `silence_behaviour`    | wide    | 'wide' or 'hold' when nobody is speaking            |
+
+  **Default editorial profile: Direct.** AUTOEDIT should start by cutting immediately to the active single speaker, cutting to wide during overlap, and cutting to wide in silence. If the result feels too twitchy, loosen it deliberately: raise `min_shot_ms` to ~600–1200 ms, add `tail_ms` around 100–250 ms, optionally add `lead_in_ms` around 80–120 ms, or enable `wide_interval_ms` (for example 45–90 s) as a relief-wide when one person has been on screen too long.
+
+  **Existing-project rule:** `cuts.params_json` is stored per generated cut. Changing defaults or deploying new code does not rewrite old cuts. To make an existing project use Direct behavior, regenerate the rough cut from the player Direct preset or call `POST /projects/{id}/cut` with the Direct params above.
 
 - **Definition of Done:**
   
@@ -612,7 +616,7 @@ A suggested whole-project order is in Appendix A. Within a module, stages are st
 
 - **Goal:** polish the cut feel.
 - **Depends on:** 6.1.
-- **Build:** enforce `min_shot_ms` by merging/extending short shots into neighbours (prefer extending the incoming speaker). Inject jittered periodic wides if `wide_interval_ms > 0`, but only where they don't violate `min_shot_ms`.
+- **Build:** enforce `min_shot_ms` by merging/extending short shots into neighbours (prefer extending the incoming speaker). Direct mode keeps this value low; looser profiles raise it. Inject jittered relief wides if `wide_interval_ms > 0`, but only where they don't violate `min_shot_ms`.
 - **Definition of Done:** with a pathological rapid-fire back-and-forth input, output respects `min_shot_ms`; periodic wides appear at roughly the requested cadence.
 
 ### Stage 6.3 — Sub-edit generation (themed / social)
@@ -648,7 +652,7 @@ A suggested whole-project order is in Appendix A. Within a module, stages are st
 
 - **Goal:** nobody reaches the app or media without TLS + a session.
 - **Depends on:** 3.1.
-- **Build:** `proxy` container (Caddy/nginx) terminating HTTPS for `PUBLIC_DOMAIN`, HTTP→HTTPS redirect, reverse-proxy to `app`. Login endpoint (shared password minimum, or `users` table with bcrypt + signed httpOnly cookies). Rate-limit auth + upload. CORS locked to `PUBLIC_DOMAIN`.
+- **Build:** Nginx Proxy Manager terminates HTTPS for `PUBLIC_DOMAIN` in the current Unraid deployment and reverse-proxies to the host-networked app on port 8010. Other deployments may use Caddy/nginx, but Peter's canonical path is NPM. Login endpoint (shared password minimum, or `users` table with bcrypt + signed httpOnly cookies). Rate-limit auth + upload. CORS locked to `PUBLIC_DOMAIN`.
 - **Definition of Done:**
   - All routes except health + ACME require a session.
   - TLS cert provisions; plain HTTP redirects.
