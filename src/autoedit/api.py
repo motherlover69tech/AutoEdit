@@ -293,18 +293,18 @@ def create_app(
     def _rebased_sync_offsets(angle_rows: list, base_angle_id: str | None) -> dict[str, int]:
         """Convert stored sync offsets into the activity/audio timeline basis.
 
-        Stored offsets use the compute_sync_offsets convention: positive means
-        the angle starts later than the sync reference. If the activity/program
-        timeline is based on another angle, subtract that base angle's stored
-        offset so the returned values are still "positive = this angle is
-        delayed relative to the activity timeline". CDL source mapping is then
-        source_ms = timeline_ms - rebased_offset.
+        AutoEdit stores sync offsets in the source-time adjustment convention:
+        a positive stored offset means source time is ahead of the reference
+        timeline. If the activity/program timeline is based on another angle,
+        subtract each angle from that base so generate_cdl's
+        source_ms = timeline_ms - rebased_offset mapping produces the stored
+        source-time adjustment.
         """
         raw_offsets = {a.id: int(a.sync_offset_ms or 0) for a in angle_rows}
         if base_angle_id is None or base_angle_id not in raw_offsets:
             return raw_offsets
         base_offset = raw_offsets[base_angle_id]
-        return {angle_id: offset - base_offset for angle_id, offset in raw_offsets.items()}
+        return {angle_id: base_offset - offset for angle_id, offset in raw_offsets.items()}
 
     def _speaker_camera_map(angle_rows: list, channel_rows: list) -> dict[str, str]:
         """Map speaker labels to visible camera angles, not necessarily audio-source angles."""
@@ -1047,7 +1047,7 @@ def create_app(
                 # source_ms = timeline_ms + source_time_offset_ms.
                 # This is for manual angle preview only; auto-cut clips already
                 # carry synced src_in_ms in the CDL.
-                "source_time_offset_ms": base_sync_offset - int(angle["sync_offset_ms"] or 0),
+                "source_time_offset_ms": int(angle["sync_offset_ms"] or 0) - base_sync_offset,
             }
             proxy_low_url = _strict_media_url(project_id, angle.get("proxy_low_path"), "proxy_low")
             if proxy_low_url is not None:

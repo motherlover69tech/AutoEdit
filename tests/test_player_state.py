@@ -252,7 +252,7 @@ def test_player_state_returns_frontend_bootstrap_payload(app_context):
         "proxy_url": f"/projects/{seeded['project_id']}/media/proxy/{seeded['angle_a']}.proxy.mp4",
         "proxy_low_url": f"/projects/{seeded['project_id']}/media/proxy_low/{seeded['angle_a']}.proxy.mp4",
         "sync_offset_ms": 0,
-        "source_time_offset_ms": 100,
+        "source_time_offset_ms": -100,
     }
 
     angle_b = angles_by_id[seeded["angle_b"]]

@@ -398,16 +398,12 @@ def test_cut_rebases_offsets_to_audio_source_and_maps_speakers_to_camera_roles(a
     assert cut.status_code == 200
     body = cut.json()
     clips = body["clips"]
-    # Presenter is delayed relative to the A013 audio timeline, so the cut must
-    # not save negative presenter src_in_ms. It uses the base/audio camera until
-    # the presenter source exists, then resumes the intended presenter angle.
-    assert clips[0]["angle_id"] == interviewee_id
-    assert clips[0]["src_in_ms"] == 0
-    assert clips[0]["reason"].startswith("source_unavailable:")
-    assert clips[1]["angle_id"] == presenter_id
-    assert clips[1]["src_in_ms"] == 0
-    assert abs(clips[1]["timeline_in_ms"] - 7335) <= 50
-    assert clips[2]["angle_id"] == interviewee_id
+    # Timeline is based on A013 audio, so A013 source time stays at timeline time
+    # and the presenter camera is rebased by roughly 31.315s - 23.980s.
+    assert clips[0]["angle_id"] == presenter_id
+    assert clips[1]["angle_id"] == interviewee_id
+    assert abs(clips[0]["src_in_ms"] - 7335) <= 50
+    assert abs(clips[1]["src_in_ms"] - 10000) <= 50
     assert all(clip["src_in_ms"] >= 0 for clip in clips)
     assert body["validation"]["valid"] is True
 
@@ -423,7 +419,7 @@ def test_cut_repairs_mid_timeline_source_overrun(auth_client):
     with Session(engine) as session:
         session.execute(angles.insert().values(
             id=wide_id, project_id=pid, label="Wide", role="wide",
-            source_path="source/wide.mov", sync_offset_ms=-1000, duration_ms=5000,
+            source_path="source/wide.mov", sync_offset_ms=1000, duration_ms=5000,
         ))
         session.execute(angles.insert().values(
             id=base_id, project_id=pid, label="Base", role="cam_right",
