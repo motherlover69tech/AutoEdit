@@ -34,7 +34,7 @@ from autoedit.activity import compute_activity_timeline
 from autoedit.audio import SyncQualityError, compute_sync_offsets, extract_channel, extract_guide_track
 from autoedit.conciseness import grade_conciseness
 from autoedit.config import Settings
-from autoedit.cdl_validator import frame_boundary_ms, validate_cdl
+from autoedit.cdl_validator import frame_boundary_ms, ms_to_frames as cdl_ms_to_frames, validate_cdl
 from autoedit.cut_engine import DEFAULT_CUT_PARAMS, generate_cdl
 from autoedit.db.migrate import run_migrations
 from autoedit.db.schema import (
@@ -291,12 +291,20 @@ def create_app(
         return max(counts, key=lambda aid: (counts[aid], -first_seen.get(aid, 0)))
 
     def _rebased_sync_offsets(angle_rows: list, base_angle_id: str | None) -> dict[str, int]:
-        """Convert wide-reference sync offsets into the activity/audio timeline basis."""
+        """Convert stored sync offsets into the activity/audio timeline basis.
+
+        Stored offsets use the compute_sync_offsets convention: positive means
+        the angle starts later than the sync reference. If the activity/program
+        timeline is based on another angle, subtract that base angle's stored
+        offset so the returned values are still "positive = this angle is
+        delayed relative to the activity timeline". CDL source mapping is then
+        source_ms = timeline_ms - rebased_offset.
+        """
         raw_offsets = {a.id: int(a.sync_offset_ms or 0) for a in angle_rows}
         if base_angle_id is None or base_angle_id not in raw_offsets:
             return raw_offsets
         base_offset = raw_offsets[base_angle_id]
-        return {angle_id: base_offset - offset for angle_id, offset in raw_offsets.items()}
+        return {angle_id: offset - base_offset for angle_id, offset in raw_offsets.items()}
 
     def _speaker_camera_map(angle_rows: list, channel_rows: list) -> dict[str, str]:
         """Map speaker labels to visible camera angles, not necessarily audio-source angles."""
@@ -1039,7 +1047,7 @@ def create_app(
                 # source_ms = timeline_ms + source_time_offset_ms.
                 # This is for manual angle preview only; auto-cut clips already
                 # carry synced src_in_ms in the CDL.
-                "source_time_offset_ms": int(angle["sync_offset_ms"] or 0) - base_sync_offset,
+                "source_time_offset_ms": base_sync_offset - int(angle["sync_offset_ms"] or 0),
             }
             proxy_low_url = _strict_media_url(project_id, angle.get("proxy_low_path"), "proxy_low")
             if proxy_low_url is not None:
@@ -1906,8 +1914,8 @@ def create_app(
             extract_guide_track(str(source_path), str(guide_path))
             guide_tracks[angle_row.id] = str(guide_path)
 
-        wide_angle = next((a for a in angle_rows if a.role == "wide" and a.id in guide_tracks), None)
-        reference_id = wide_angle.id if wide_angle is not None else angle_ids[0]
+        base_angle_id = _audio_timeline_base_angle_id(ch_rows)
+        reference_id = base_angle_id if base_angle_id in guide_tracks else angle_ids[0]
         try:
             offsets = (sync_fn or compute_sync_offsets)(guide_tracks, reference_id)
         except SyncQualityError as exc:
@@ -2554,7 +2562,8 @@ def create_app(
         # Build sync offsets in the same timeline basis as activity.json. The
         # activity timeline comes from extracted speaker channel WAVs, so its
         # zero is the primary audio-source angle, not necessarily the wide angle.
-        sync_offsets = _rebased_sync_offsets(angle_rows, _audio_timeline_base_angle_id(ch_rows))
+        base_angle_id = _audio_timeline_base_angle_id(ch_rows)
+        sync_offsets = _rebased_sync_offsets(angle_rows, base_angle_id)
 
         # Find wide angle
         wide_angle_id = None
@@ -2589,6 +2598,79 @@ def create_app(
         }
         fnum, fden = project["fps_num"], project["fps_den"]
         clips_list = cdl.get("clips", [])
+
+        def _snap_ms(value: int) -> int:
+            return frame_boundary_ms(cdl_ms_to_frames(value, fnum, fden), fnum, fden)
+
+        def _source_clip(angle_id: str, t_in: int, t_out: int, reason: str) -> dict | None:
+            dur = t_out - t_in
+            if dur <= 0:
+                return None
+            src_in = _snap_ms(t_in - int(sync_offsets.get(angle_id, 0)))
+            return {
+                "angle_id": angle_id,
+                "src_in_ms": src_in,
+                "timeline_in_ms": t_in,
+                "dur_ms": dur,
+                "reason": reason,
+            }
+
+        def _clip_within_source(clip: dict) -> bool:
+            src_in = int(clip["src_in_ms"])
+            if src_in < 0:
+                return False
+            media_ms = angle_duration_ms.get(clip["angle_id"])
+            if media_ms is not None and src_in + int(clip["dur_ms"]) > media_ms:
+                return False
+            return True
+
+        def _fallback_clip(t_in: int, t_out: int, original: dict, previous_angle_id: str | None) -> dict | None:
+            preferred = [base_angle_id, previous_angle_id, *speaker_to_angle.values()]
+            preferred.extend(a.id for a in angle_rows)
+            seen: set[str] = set()
+            for angle_id in preferred:
+                if not angle_id or angle_id in seen or angle_id == original["angle_id"]:
+                    continue
+                seen.add(angle_id)
+                candidate = _source_clip(
+                    angle_id,
+                    t_in,
+                    t_out,
+                    f"source_unavailable:{original['angle_id']}:{original.get('reason', '')}",
+                )
+                if candidate is not None and _clip_within_source(candidate):
+                    return candidate
+            return None
+
+        repaired_clips: list[dict] = []
+        for clip in clips_list:
+            t_in = int(clip["timeline_in_ms"])
+            t_out = t_in + int(clip["dur_ms"])
+            src_in = int(clip["src_in_ms"])
+            if src_in < 0:
+                # The requested camera has no source frame yet. Fill the
+                # unavailable leading span with an already-available angle,
+                # then resume the requested angle at source time zero if the
+                # clip extends far enough. This prevents the browser/NLE from
+                # clamping to frame 0 and repeating it.
+                available_from = _snap_ms(t_in - src_in)
+                split_at = min(max(available_from, t_in), t_out)
+                fallback = _fallback_clip(
+                    t_in,
+                    split_at,
+                    clip,
+                    repaired_clips[-1]["angle_id"] if repaired_clips else None,
+                )
+                if fallback is not None:
+                    repaired_clips.append(fallback)
+                if split_at < t_out:
+                    resumed = _source_clip(clip["angle_id"], split_at, t_out, clip.get("reason", ""))
+                    if resumed is not None and _clip_within_source(resumed):
+                        repaired_clips.append(resumed)
+                continue
+            repaired_clips.append(clip)
+        clips_list[:] = repaired_clips
+
         while clips_list:
             last = clips_list[-1]
             media_ms = angle_duration_ms.get(last["angle_id"])

@@ -248,7 +248,7 @@ def test_media_endpoint_only_serves_db_known_media_with_playback_headers(tmp_pat
     assert "attachment" not in known_response.headers.get("content-disposition", "").lower()
 
 
-def test_sync_uses_wide_angle_as_reference_when_present(tmp_path: Path):
+def test_sync_uses_primary_audio_source_as_reference_even_when_wide_present(tmp_path: Path):
     client, engine = _client(tmp_path)
     project_id = _project(client)
     source_dir = tmp_path / project_id / "source"
@@ -278,7 +278,7 @@ def test_sync_uses_wide_angle_as_reference_when_present(tmp_path: Path):
         response = sync_client.post(f"/projects/{project_id}/sync")
 
     assert response.status_code == 200
-    assert references == [wide_id]
+    assert references == [cam_id]
 
 
 def test_diarize_response_marks_placeholder_mode(tmp_path: Path):

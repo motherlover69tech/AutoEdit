@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from autoedit.api import create_app
 from autoedit.db.migrate import run_migrations
 from autoedit.db.schema import angles, audio_channels, projects
+from autoedit.projects import new_ulid
 
 
 # ── Utils ────────────────────────────────────────────────────────────
@@ -561,6 +562,70 @@ def test_sync_endpoint_extracts_channels_and_computes_offsets(auth_client):
     for row in rows:
         assert row.wav_path is not None
         assert row.wav_path.startswith("audio/ch_")
+
+
+def test_sync_endpoint_uses_audio_source_angle_not_wide_as_reference(auth_client):
+    client, data_root, engine = auth_client
+    project = client.post(
+        "/projects", json={"name": "Wide ref regression", "fps_num": 24000, "fps_den": 1001},
+    ).json()
+    pid = project["id"]
+    wide_id = new_ulid()
+    presenter_id = new_ulid()
+    interviewee_id = new_ulid()
+    source_dir = data_root / pid / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    for filename in ("wide.mp4", "presenter.mp4", "interviewee.mp4"):
+        (source_dir / filename).write_text("")
+    with Session(engine) as session:
+        session.execute(angles.insert(), [
+            {
+                "id": wide_id,
+                "project_id": pid,
+                "label": "Wide",
+                "role": "wide",
+                "source_path": "source/wide.mp4",
+                "sync_offset_ms": 0,
+            },
+            {
+                "id": presenter_id,
+                "project_id": pid,
+                "label": "Presenter",
+                "role": "cam_left",
+                "source_path": "source/presenter.mp4",
+                "sync_offset_ms": 0,
+            },
+            {
+                "id": interviewee_id,
+                "project_id": pid,
+                "label": "Interviewee",
+                "role": "cam_right",
+                "source_path": "source/interviewee.mp4",
+                "sync_offset_ms": 0,
+            },
+        ])
+        session.commit()
+    client.post(f"/projects/{pid}/channels", json={
+        "mappings": [
+            {"source_angle_id": interviewee_id, "channel_index": 0, "speaker_label": "presenter"},
+            {"source_angle_id": interviewee_id, "channel_index": 1, "speaker_label": "interviewee"},
+        ],
+    })
+
+    seen_reference = []
+
+    def sync_fn(guide_tracks, reference_angle_id, operator_nudge_ms=0):
+        seen_reference.append(reference_angle_id)
+        return {angle_id: (0 if angle_id == reference_angle_id else 50) for angle_id in guide_tracks}
+
+    app = create_app(engine=engine, data_root=data_root, auth_enabled=False, sync_fn=sync_fn)
+    test_client = TestClient(app)
+
+    with patch("autoedit.audio.run_ffmpeg_watchdog", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
+        response = test_client.post(f"/projects/{pid}/sync")
+
+    assert response.status_code == 200
+    assert seen_reference == [interviewee_id]
 
 
 def _mock_compute_sync(delay_ms: int):

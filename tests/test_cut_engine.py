@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from autoedit.api import create_app
 from autoedit.db.migrate import run_migrations
-from autoedit.db.schema import angles, audio_channels, cuts
+from autoedit.db.schema import angles, cuts
 from autoedit.projects import new_ulid
 
 
@@ -397,13 +396,20 @@ def test_cut_rebases_offsets_to_audio_source_and_maps_speakers_to_camera_roles(a
     })
 
     assert cut.status_code == 200
-    clips = cut.json()["clips"]
-    assert clips[0]["angle_id"] == presenter_id
-    assert clips[1]["angle_id"] == interviewee_id
-    # Timeline is based on A013 audio, so A013 source time stays at timeline time
-    # and the presenter camera is rebased by roughly 31.315s - 23.980s.
-    assert abs(clips[0]["src_in_ms"] - 7335) <= 50
-    assert abs(clips[1]["src_in_ms"] - 10000) <= 50
+    body = cut.json()
+    clips = body["clips"]
+    # Presenter is delayed relative to the A013 audio timeline, so the cut must
+    # not save negative presenter src_in_ms. It uses the base/audio camera until
+    # the presenter source exists, then resumes the intended presenter angle.
+    assert clips[0]["angle_id"] == interviewee_id
+    assert clips[0]["src_in_ms"] == 0
+    assert clips[0]["reason"].startswith("source_unavailable:")
+    assert clips[1]["angle_id"] == presenter_id
+    assert clips[1]["src_in_ms"] == 0
+    assert abs(clips[1]["timeline_in_ms"] - 7335) <= 50
+    assert clips[2]["angle_id"] == interviewee_id
+    assert all(clip["src_in_ms"] >= 0 for clip in clips)
+    assert body["validation"]["valid"] is True
 
 
 def test_cut_with_custom_params(project_with_activity):
