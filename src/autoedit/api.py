@@ -2606,6 +2606,14 @@ def create_app(
         def _snap_ms(value: int) -> int:
             return frame_boundary_ms(cdl_ms_to_frames(value, fnum, fden), fnum, fden)
 
+        def _floor_frame_ms(value: int) -> int:
+            frame = (value * fnum) // (fden * 1000)
+            ms = frame_boundary_ms(frame, fnum, fden)
+            while ms > value and frame > 0:
+                frame -= 1
+                ms = frame_boundary_ms(frame, fnum, fden)
+            return ms
+
         def _source_clip(angle_id: str, t_in: int, t_out: int, reason: str) -> dict | None:
             dur = t_out - t_in
             if dur <= 0:
@@ -2671,6 +2679,29 @@ def create_app(
                     resumed = _source_clip(clip["angle_id"], split_at, t_out, clip.get("reason", ""))
                     if resumed is not None and _clip_within_source(resumed):
                         repaired_clips.append(resumed)
+                continue
+            media_ms = angle_duration_ms.get(clip["angle_id"])
+            if media_ms is not None and src_in + int(clip["dur_ms"]) > media_ms:
+                # The requested camera runs out before this timeline segment
+                # ends. Keep the valid leading portion and fill the overrun
+                # tail from another available angle instead of saving a clip
+                # that exports as black or repeats/clamps at the end.
+                valid_until = _floor_frame_ms(t_in + max(0, media_ms - src_in))
+                split_at = min(max(valid_until, t_in), t_out)
+                if split_at > t_in:
+                    leading = dict(clip)
+                    leading["dur_ms"] = split_at - t_in
+                    if _clip_within_source(leading):
+                        repaired_clips.append(leading)
+                if split_at < t_out:
+                    fallback = _fallback_clip(
+                        split_at,
+                        t_out,
+                        clip,
+                        repaired_clips[-1]["angle_id"] if repaired_clips else None,
+                    )
+                    if fallback is not None:
+                        repaired_clips.append(fallback)
                 continue
             repaired_clips.append(clip)
         clips_list[:] = repaired_clips

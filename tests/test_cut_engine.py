@@ -412,6 +412,52 @@ def test_cut_rebases_offsets_to_audio_source_and_maps_speakers_to_camera_roles(a
     assert body["validation"]["valid"] is True
 
 
+def test_cut_repairs_mid_timeline_source_overrun(auth_client):
+    client, data_root, engine = auth_client
+    project = client.post(
+        "/projects", json={"name": "Overrun repair", "fps_num": 24000, "fps_den": 1001},
+    )
+    pid = project.json()["id"]
+    wide_id = new_ulid()
+    base_id = new_ulid()
+    with Session(engine) as session:
+        session.execute(angles.insert().values(
+            id=wide_id, project_id=pid, label="Wide", role="wide",
+            source_path="source/wide.mov", sync_offset_ms=-1000, duration_ms=5000,
+        ))
+        session.execute(angles.insert().values(
+            id=base_id, project_id=pid, label="Base", role="cam_right",
+            source_path="source/base.mov", sync_offset_ms=0, duration_ms=20000,
+        ))
+        session.commit()
+    assert client.post(f"/projects/{pid}/channels", json={
+        "mappings": [
+            {"source_angle_id": base_id, "channel_index": 0, "speaker_label": "wide"},
+            {"source_angle_id": base_id, "channel_index": 1, "speaker_label": "interviewee"},
+        ],
+    }).status_code == 201
+    audio_dir = data_root / pid / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    (audio_dir / "activity.json").write_text(json.dumps({
+        "timeline": [{"start_ms": 0, "end_ms": 10000, "active": ["wide"]}],
+        "total_duration_ms": 10000,
+    }))
+
+    response = client.post(f"/projects/{pid}/cut", json={
+        "params": {"lead_in_ms": 0, "tail_ms": 0, "min_shot_ms": 1},
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["validation"]["valid"] is True
+    clips = body["clips"]
+    assert clips[0]["angle_id"] == wide_id
+    assert clips[0]["src_in_ms"] >= 0
+    assert clips[0]["src_in_ms"] + clips[0]["dur_ms"] <= 5000
+    assert any(clip["angle_id"] == base_id for clip in clips[1:])
+    assert all(clip["src_in_ms"] >= 0 for clip in clips)
+
+
 def test_cut_with_custom_params(project_with_activity):
     client, data_root, engine, pid = project_with_activity
     response = client.post(f"/projects/{pid}/cut", json={
