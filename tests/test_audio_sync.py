@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import struct
 import wave
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -9,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, select
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session
 
@@ -542,7 +541,7 @@ def test_sync_endpoint_extracts_channels_and_computes_offsets(auth_client):
     )
     test_client = TestClient(app)
 
-    with patch("subprocess.run", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
+    with patch("autoedit.audio.run_ffmpeg_watchdog", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
         response = test_client.post(f"/projects/{pid}/sync")
 
     assert response.status_code == 200
@@ -597,7 +596,7 @@ def test_sync_endpoint_applies_operator_nudge(auth_client):
     )
     test_client = TestClient(app)
 
-    with patch("subprocess.run", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
+    with patch("autoedit.audio.run_ffmpeg_watchdog", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
         response = test_client.post(f"/projects/{pid}/sync")
 
     assert response.status_code == 200
@@ -630,7 +629,7 @@ def test_sync_endpoint_roundtrips_integer_ms(auth_client):
     )
     test_client = TestClient(app)
 
-    with patch("subprocess.run", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
+    with patch("autoedit.audio.run_ffmpeg_watchdog", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
         response = test_client.post(f"/projects/{pid}/sync")
 
     assert response.status_code == 200
@@ -657,7 +656,7 @@ def test_sync_endpoint_reports_low_quality_sync_as_error(auth_client):
     )
     test_client = TestClient(app)
 
-    with patch("subprocess.run", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
+    with patch("autoedit.audio.run_ffmpeg_watchdog", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
         response = test_client.post(f"/projects/{pid}/sync")
 
     assert response.status_code == 422
@@ -693,7 +692,7 @@ def test_sync_endpoint_does_not_compound_previous_auto_sync(auth_client):
     )
     test_client = TestClient(app)
 
-    with patch("subprocess.run", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
+    with patch("autoedit.audio.run_ffmpeg_watchdog", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
         first = test_client.post(f"/projects/{pid}/sync")
         second = test_client.post(f"/projects/{pid}/sync")
 

@@ -117,7 +117,7 @@ def test_proxy_filename_uses_angle_id_not_untrusted_label(tmp_path: Path):
     project_id = _project(client)
     angle = _upload_angle(client, project_id, label="../escape")
 
-    with patch("subprocess.run", side_effect=_ffmpeg_ok):
+    with patch("autoedit.proxy.run_ffmpeg_watchdog", side_effect=_ffmpeg_ok):
         response = client.post(f"/projects/{project_id}/angles/{angle['id']}/proxy")
 
     assert response.status_code == 200
@@ -154,7 +154,7 @@ def test_sync_wav_filename_uses_channel_id_not_untrusted_speaker_label(tmp_path:
 
     app = create_app(engine=engine, data_root=tmp_path, auth_enabled=False, sync_fn=sync_fn)
     sync_client = TestClient(app)
-    with patch("subprocess.run", side_effect=_ffmpeg_ok):
+    with patch("autoedit.audio.run_ffmpeg_watchdog", side_effect=_ffmpeg_ok):
         response = sync_client.post(f"/projects/{project_id}/sync")
 
     assert response.status_code == 200
@@ -208,7 +208,7 @@ def test_program_audio_passes_map_as_separate_ffmpeg_argv_tokens():
         captured.append(cmd)
         return _ffmpeg_ok(cmd, **kwargs)
 
-    with patch("subprocess.run", side_effect=capture):
+    with patch("autoedit.program_audio.run_ffmpeg_watchdog", side_effect=capture):
         generate_program_audio([("/tmp/a.wav", 0), ("/tmp/b.wav", 50)], "/tmp/out.m4a")
 
     cmd = captured[0]
@@ -274,7 +274,7 @@ def test_sync_uses_wide_angle_as_reference_when_present(tmp_path: Path):
     app = create_app(engine=engine, data_root=tmp_path, auth_enabled=False, sync_fn=sync_fn)
     sync_client = TestClient(app)
 
-    with patch("subprocess.run", side_effect=_ffmpeg_ok):
+    with patch("autoedit.audio.run_ffmpeg_watchdog", side_effect=_ffmpeg_ok):
         response = sync_client.post(f"/projects/{project_id}/sync")
 
     assert response.status_code == 200

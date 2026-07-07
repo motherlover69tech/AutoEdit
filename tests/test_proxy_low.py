@@ -16,7 +16,12 @@ from autoedit.db.schema import angles
 
 
 @pytest.fixture
-def auth_client(tmp_path: Path):
+def auth_client(tmp_path: Path, monkeypatch):
+    # These tests assert software-encoder (libx264) ffmpeg flags. The app
+    # default is h264_vaapi, which emits scale_vaapi/-vaapi_device instead,
+    # so pin the software encoder to keep the assertions environment-independent
+    # (they previously broke on any host with a /dev/dri node).
+    monkeypatch.setenv("PROXY_ENCODER", "libx264")
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -118,7 +123,7 @@ def test_single_angle_proxy_low_updates_db(project_with_angle):
     pid = project_body["id"]
     aid = angle["id"]
 
-    with patch("subprocess.run", side_effect=_mock_ffmpeg()):
+    with patch("autoedit.proxy.run_ffmpeg_watchdog", side_effect=_mock_ffmpeg()):
         response = client.post(f"/projects/{pid}/angles/{aid}/proxy-low")
 
     assert response.status_code == 200
@@ -143,7 +148,7 @@ def test_bulk_proxy_low_generates_for_all_angles(auth_client):
     angle_a = _seed_angle(client, pid, data_root, label="A", role="cam_left", filename="a.mp4")
     angle_b = _seed_angle(client, pid, data_root, label="B", role="cam_right", filename="b.mp4")
 
-    with patch("subprocess.run", side_effect=_mock_ffmpeg()):
+    with patch("autoedit.proxy.run_ffmpeg_watchdog", side_effect=_mock_ffmpeg()):
         response = client.post(f"/projects/{pid}/proxy-low")
 
     assert response.status_code == 200
@@ -176,7 +181,7 @@ def test_proxy_low_uses_lower_height_and_crf(project_with_angle):
         result.stderr = ""
         return result
 
-    with patch("subprocess.run", side_effect=_capture):
+    with patch("autoedit.proxy.run_ffmpeg_watchdog", side_effect=_capture):
         client.post(f"/projects/{pid}/angles/{aid}/proxy-low")
 
     assert len(captured_calls) == 1
@@ -190,7 +195,7 @@ def test_proxy_low_idempotent(project_with_angle):
     pid = project_body["id"]
     aid = angle["id"]
 
-    with patch("subprocess.run", side_effect=_mock_ffmpeg()):
+    with patch("autoedit.proxy.run_ffmpeg_watchdog", side_effect=_mock_ffmpeg()):
         r1 = client.post(f"/projects/{pid}/angles/{aid}/proxy-low")
         r2 = client.post(f"/projects/{pid}/angles/{aid}/proxy-low")
 

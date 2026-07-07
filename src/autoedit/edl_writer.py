@@ -4,10 +4,17 @@ from pathlib import Path
 
 
 def _ms_to_timecode(t_ms: int, fps_num: int, fps_den: int) -> str:
-    """Convert milliseconds to CMX3600 timecode (HH:MM:SS:FF)."""
+    """Convert milliseconds to CMX3600 non-drop timecode (HH:MM:SS:FF).
+
+    Non-drop timecode counts a nominal integer number of frames per second
+    (24 for 23.976, 30 for 29.97). The previous code divided by fps_num
+    directly, which is only correct when fps_den == 1 — at 24000/1001 it
+    treated 24000 frames as one second and emitted garbage timecode.
+    """
     total_frames = round(t_ms * fps_num / (fps_den * 1000))
-    frames = total_frames % fps_num
-    total_seconds = total_frames // fps_num
+    nominal_fps = round(fps_num / fps_den)
+    frames = total_frames % nominal_fps
+    total_seconds = total_frames // nominal_fps
     seconds = total_seconds % 60
     total_minutes = total_seconds // 60
     minutes = total_minutes % 60

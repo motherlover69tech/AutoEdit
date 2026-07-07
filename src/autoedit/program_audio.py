@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import subprocess
+
+from autoedit.ffproc import run_ffmpeg_watchdog
 import wave
-from pathlib import Path
 
 
 def _wav_duration_seconds(path: str) -> float | None:
@@ -77,7 +77,7 @@ def generate_program_audio(
         plog.cmd("program_audio", cmd)
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = run_ffmpeg_watchdog(cmd)
     except FileNotFoundError as exc:
         raise RuntimeError("ffmpeg executable not found") from exc
 

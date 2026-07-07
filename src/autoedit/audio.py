@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from scipy import signal as scipy_signal
+
+from autoedit.ffproc import run_ffmpeg_watchdog
 
 
 class SyncQualityError(RuntimeError):
@@ -458,6 +457,73 @@ def _matching_transient_burst_offset(
     return best_candidate
 
 
+def _fine_envelope_refinement(
+    reference: np.ndarray,
+    other: np.ndarray,
+    sample_rate: int,
+    *,
+    coarse_offset_ms: int,
+    fine_ms: int = 5,
+    search_ms: int = 150,
+    window_seconds: float = 60.0,
+) -> int | None:
+    """Refine a coarse envelope offset on a fine 5 ms grid.
+
+    The coarse path works on a 50 ms RMS envelope and rounds its answer to a
+    multiple of 50 ms — up to ±1-2 frames of lip-sync error at 25 fps when no
+    clap/slate is available for the transient path. This pass re-correlates a
+    high-energy region on a 5 ms envelope within ±search_ms of the coarse
+    offset, keeping the robustness of envelope matching (immune to mic
+    phase/position differences, unlike raw-waveform correlation) while
+    reducing quantisation to 1/8th of a frame.
+
+    Returns a refined offset in ms (same sign convention as
+    find_sync_offset), or None when the signals are too short or the fine
+    correlation is not clearly peaked.
+    """
+    env_ref = _normalize_envelope(_energy_envelope(reference, sample_rate, fine_ms))
+    env_other = _normalize_envelope(_energy_envelope(other, sample_rate, fine_ms))
+
+    lag_frames = max(1, round(search_ms / fine_ms))
+    coarse_frames = round(coarse_offset_ms / fine_ms)
+    window_frames = max(40, round(window_seconds * 1000 / fine_ms))
+    window_frames = min(window_frames, len(env_ref), max(40, len(env_other) // 2))
+    if len(env_ref) < 40 or len(env_other) < 40:
+        return None
+
+    # Pick the highest-energy reference window whose counterpart (under the
+    # coarse offset) lies fully inside the other track, including lag margin.
+    step = max(1, window_frames // 2)
+    best_start, best_score = None, 0.0
+    for start in range(0, len(env_ref) - window_frames + 1, step):
+        other_start = start - coarse_frames - lag_frames
+        other_end = start - coarse_frames + window_frames + lag_frames
+        if other_start < 0 or other_end > len(env_other):
+            continue
+        segment = env_ref[start:start + window_frames]
+        score = float(segment.std()) * float(np.mean(np.abs(segment)))
+        if score > best_score:
+            best_score, best_start = score, start
+    if best_start is None or best_score <= 1e-6:
+        return None
+
+    ref_seg = env_ref[best_start:best_start + window_frames]
+    o_lo = best_start - coarse_frames - lag_frames
+    o_hi = best_start - coarse_frames + window_frames + lag_frames
+    other_seg = env_other[o_lo:o_hi]
+
+    corr = scipy_signal.correlate(other_seg, ref_seg, mode="valid", method="fft")
+    if corr.size == 0 or _correlation_quality(corr) < 2.5:
+        return None
+    k = int(np.argmax(np.abs(corr)))
+    matched_other_start = o_lo + k
+    refined_frames = best_start - matched_other_start
+    refined_ms = refined_frames * fine_ms
+    if abs(refined_ms - coarse_offset_ms) > search_ms:
+        return None
+    return int(refined_ms)
+
+
 def find_sync_offset(
     reference: np.ndarray,
     other: np.ndarray,
@@ -488,6 +554,12 @@ def find_sync_offset(
     )
     clustered = _cluster_offset_candidates(candidates, min_quality=min_quality)
     envelope_result = clustered if clustered is not None else _full_envelope_offset(env_ref, env_other, window_ms=window_ms)
+
+    refined_ms = _fine_envelope_refinement(
+        reference, other, sample_rate, coarse_offset_ms=envelope_result[0]
+    )
+    if refined_ms is not None:
+        envelope_result = (refined_ms, envelope_result[1])
 
     transient = _matching_transient_burst_offset(reference, other, sample_rate, base_offset_ms=envelope_result[0])
     if transient is not None and transient[1] >= min_quality:
@@ -553,7 +625,10 @@ def extract_channel(
     if plog is not None:
         plog.cmd("extract_channel", cmd)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        # Stall watchdog instead of a fixed timeout: extracting audio from
+        # 60-90+ minute sources on slow/busy storage legitimately exceeded
+        # the old timeout=600, aborting the whole pipeline.
+        result = run_ffmpeg_watchdog(cmd)
     except FileNotFoundError as exc:
         raise RuntimeError("ffmpeg executable not found") from exc
     if plog is not None:
@@ -580,7 +655,7 @@ def extract_guide_track(
     if plog is not None:
         plog.cmd("guide_track", cmd)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = run_ffmpeg_watchdog(cmd)
     except FileNotFoundError as exc:
         raise RuntimeError("ffmpeg executable not found") from exc
     if plog is not None:

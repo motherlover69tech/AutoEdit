@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session
 
@@ -71,7 +70,6 @@ def project_with_wavs(auth_client):
 
     import wave as _wave
     import numpy as _np
-    import struct
 
     def _write_wav(path, duration_samples=48000):
         samples = (_np.sin(_np.linspace(0, 440 * 2 * _np.pi, duration_samples)) * 32767).astype(_np.int16)
@@ -107,9 +105,8 @@ def project_with_wavs(auth_client):
 def test_generate_program_audio_calls_ffmpeg():
     """generate_program_audio invokes ffmpeg with correct args for stereo mix."""
     from autoedit.program_audio import generate_program_audio
-    import subprocess
 
-    with patch("subprocess.run") as mock_run:
+    with patch("autoedit.program_audio.run_ffmpeg_watchdog") as mock_run:
         mock_run.return_value.returncode = 0
 
         generate_program_audio(
@@ -142,7 +139,7 @@ def test_generate_program_audio_single_channel():
     """Single channel → mono output without amerge."""
     from autoedit.program_audio import generate_program_audio
 
-    with patch("subprocess.run") as mock_run:
+    with patch("autoedit.program_audio.run_ffmpeg_watchdog") as mock_run:
         mock_run.return_value.returncode = 0
         generate_program_audio([("/tmp/a.wav", 0)], "/tmp/program.m4a")
 
@@ -157,7 +154,7 @@ def test_generate_program_audio_ffmpeg_failure():
     """RuntimeError is raised on ffmpeg non-zero exit."""
     from autoedit.program_audio import generate_program_audio
 
-    with patch("subprocess.run") as mock_run:
+    with patch("autoedit.program_audio.run_ffmpeg_watchdog") as mock_run:
         mock_run.return_value.returncode = 1
         mock_run.return_value.stderr = "ffmpeg error"
 
@@ -239,7 +236,7 @@ def test_program_audio_generates_m4a(project_with_wavs):
     """Program audio route creates program.m4a file."""
     client, data_root, engine, pid = project_with_wavs
 
-    with patch("subprocess.run") as mock_run:
+    with patch("autoedit.program_audio.run_ffmpeg_watchdog") as mock_run:
         mock_run.return_value.returncode = 0
 
         response = client.post(f"/projects/{pid}/program-audio")
@@ -254,7 +251,7 @@ def test_program_audio_ffmpeg_args(project_with_wavs):
     """Verify ffmpeg receives correct args from the API route."""
     client, data_root, engine, pid = project_with_wavs
 
-    with patch("subprocess.run") as mock_run:
+    with patch("autoedit.program_audio.run_ffmpeg_watchdog") as mock_run:
         mock_run.return_value.returncode = 0
         client.post(f"/projects/{pid}/program-audio")
 
@@ -286,7 +283,7 @@ def test_program_audio_uses_sync_offsets(project_with_wavs):
     """The API route reads sync offsets from angles table."""
     client, data_root, engine, pid = project_with_wavs
 
-    with patch("subprocess.run") as mock_run:
+    with patch("autoedit.program_audio.run_ffmpeg_watchdog") as mock_run:
         mock_run.return_value.returncode = 0
         client.post(f"/projects/{pid}/program-audio")
 

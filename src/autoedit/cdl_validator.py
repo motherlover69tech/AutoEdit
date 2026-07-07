@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 
@@ -12,10 +11,26 @@ def ms_to_frames(t_ms: int, fps_num: int, fps_den: int) -> int:
     return round(t_ms * fps_num / (fps_den * 1000))
 
 
+def frame_boundary_ms(frames: int, fps_num: int, fps_den: int) -> int:
+    """Canonical integer-ms representation of a frame boundary.
+
+    At NTSC-family rates (23.976, 29.97, 24 fps) frame boundaries are not
+    integer milliseconds, so a convention is needed for storing them in the
+    integer-ms CDL. This rounds the exact boundary to the nearest ms
+    (half-up) and is the single source of truth shared by the cut engine
+    (which snaps to it) and the validator (which checks against it).
+    """
+    return (frames * fps_den * 1000 + fps_num // 2) // fps_num
+
+
 def is_frame_exact(t_ms: int, fps_num: int, fps_den: int) -> bool:
-    """Check if an integer ms value lands exactly on a frame boundary."""
-    frames = t_ms * fps_num / (fps_den * 1000)
-    return abs(frames - round(frames)) < 1e-6
+    """Check if an integer ms value is the canonical form of a frame boundary.
+
+    True exactness is impossible in integer ms at NTSC rates; instead a
+    value is "frame exact" when it equals frame_boundary_ms() of its
+    nearest frame — i.e. it round-trips through the canonical grid.
+    """
+    return t_ms == frame_boundary_ms(ms_to_frames(t_ms, fps_num, fps_den), fps_num, fps_den)
 
 
 def validate_cdl(
@@ -83,11 +98,20 @@ def validate_cdl(
                 "clip_index": i,
             }
 
-        # Frame-exact check
-        if not is_frame_exact(clip["dur_ms"], fps_num, fps_den):
+        # Frame-exact check: both boundaries of the clip must sit on the
+        # canonical frame grid. Checking dur_ms in isolation is wrong at
+        # NTSC rates — a span between two canonical boundaries has a
+        # duration that is NOT itself a canonical boundary value.
+        if not is_frame_exact(clip["timeline_in_ms"], fps_num, fps_den):
             return {
                 "valid": False,
-                "error": f"clip {i}: dur_ms={clip['dur_ms']} is not an exact frame multiple for {fps_num}/{fps_den} fps",
+                "error": f"clip {i}: timeline_in_ms={clip['timeline_in_ms']} is not on the frame grid for {fps_num}/{fps_den} fps",
+                "clip_index": i,
+            }
+        if not is_frame_exact(clip["timeline_in_ms"] + clip["dur_ms"], fps_num, fps_den):
+            return {
+                "valid": False,
+                "error": f"clip {i}: clip end {clip['timeline_in_ms'] + clip['dur_ms']} (timeline_in_ms + dur_ms) is not on the frame grid for {fps_num}/{fps_den} fps",
                 "clip_index": i,
             }
         if not is_frame_exact(clip["src_in_ms"], fps_num, fps_den):

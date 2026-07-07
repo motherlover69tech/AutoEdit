@@ -101,6 +101,7 @@ function renderProjects() {
     list.appendChild(empty);
     return;
   }
+  const isAdmin = state.session?.role === 'admin';
   for (const project of state.projects) {
     const card = document.createElement('article');
     card.className = 'card tight';
@@ -112,7 +113,7 @@ function renderProjects() {
       <p style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
         <a class="btn btn-primary btn-sm" href="${playerHref}">Open player</a>
         <button class="btn btn-ghost btn-sm" type="button" data-select-project="${escapeHtml(project.id)}">Ingest</button>
-        <button class="btn btn-quiet btn-sm" type="button" data-delete-project="${escapeHtml(project.id)}">Delete</button>
+        ${isAdmin ? `<button class="btn btn-quiet btn-sm" type="button" data-delete-project="${escapeHtml(project.id)}">Delete</button>` : ''}
       </p>`;
     list.appendChild(card);
   }

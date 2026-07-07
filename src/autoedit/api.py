@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+import logging
 import mimetypes
 from pathlib import Path
 from secrets import compare_digest
 from typing import Annotated, Literal
 
 import json
+import shutil
+import time
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.exceptions import RequestValidationError
@@ -15,7 +18,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from sqlalchemy import Engine, create_engine, delete, select
+from sqlalchemy import Engine, create_engine, delete, select, update
 from sqlalchemy.orm import Session
 
 import numpy as np
@@ -31,6 +34,7 @@ from autoedit.activity import compute_activity_timeline
 from autoedit.audio import SyncQualityError, compute_sync_offsets, extract_channel, extract_guide_track
 from autoedit.conciseness import grade_conciseness
 from autoedit.config import Settings
+from autoedit.cdl_validator import frame_boundary_ms, validate_cdl
 from autoedit.cut_engine import DEFAULT_CUT_PARAMS, generate_cdl
 from autoedit.db.migrate import run_migrations
 from autoedit.db.schema import (
@@ -54,7 +58,6 @@ from autoedit.probe import probe_source_file
 from autoedit.program_audio import generate_program_audio
 from autoedit.project_paths import is_ulid, project_root
 from autoedit.transcribe import mock_transcribe
-from autoedit.topics import mock_segment_topics
 from autoedit.projects import create_project as create_project_record
 from autoedit.projects import get_project as get_project_record
 from autoedit.projects import new_ulid
@@ -384,6 +387,10 @@ def create_app(
             if kind == "lut":
                 # LUT files are validated on upload; allow any .cube in the luts/ dir
                 return filename.endswith(".cube") and "/" not in filename and "\\" not in filename
+            if kind == "edit":
+                # Only the app-generated export deliverables are downloadable.
+                # These are the URLs the /export endpoint hands back to the UI.
+                return filename in ("export.fcpxml", "export.edl")
         return False
 
     def _upsert_operator_user() -> None:
@@ -417,10 +424,82 @@ def create_app(
                 )
             session.commit()
 
+    def _recover_orphaned_pipelines() -> None:
+        """Mark projects stuck in 'processing' as 'error' on startup.
+
+        The pipeline runs in an in-process background thread, so it cannot
+        survive an app restart (deploy, crash, host reboot). Any project
+        still marked 'processing' at boot is orphaned: its thread is gone,
+        the progress endpoint would report a stage as 'running' forever,
+        and /process would refuse to restart it. Flip it to 'error' so the
+        UI shows the Retry button and the pipeline can be restarted.
+        """
+        with Session(app_engine) as session:
+            stuck = session.execute(
+                select(projects.c.id).where(projects.c.status == "processing")
+            ).fetchall()
+            if stuck:
+                session.execute(
+                    update(projects)
+                    .where(projects.c.status == "processing")
+                    .values(status="error")
+                )
+                session.commit()
+        for row in stuck:
+            try:
+                project_dir = project_root(app_data_root, row.id)
+                plog = PipelineLogger(project_dir, row.id)
+                plog.error(
+                    "Pipeline interrupted by application restart; use Retry processing to restart it."
+                )
+            except Exception:
+                pass  # Logging is best-effort; status recovery already happened.
+
+    def _sweep_stale_uploads(max_age_hours: float = 48.0) -> None:
+        """Delete abandoned chunked-upload temp dirs on startup.
+
+        A resumable upload that is started but never completed (the client
+        gave up after a failed chunk, or the browser was closed mid-upload)
+        leaves its chunks under <project>/.uploads/<upload_id>/ forever.
+        For multi-gigabyte multicam sources this silently consumes disk.
+        Successful and integrity-failed uploads already clean themselves up;
+        this catches only the truly orphaned ones, identified by an mtime
+        older than max_age_hours so an in-progress upload is never touched.
+        """
+        root = Path(app_data_root)
+        if not root.is_dir():
+            return
+        cutoff = time.time() - max_age_hours * 3600
+        removed = 0
+        try:
+            upload_dirs = list(root.glob("*/.uploads/*"))
+        except OSError:
+            return
+        for upload_dir in upload_dirs:
+            if not upload_dir.is_dir():
+                continue
+            try:
+                # metadata.json is rewritten on each chunk, so its mtime
+                # tracks the last activity for this upload.
+                meta = upload_dir / "metadata.json"
+                ref = meta if meta.exists() else upload_dir
+                if ref.stat().st_mtime >= cutoff:
+                    continue
+                shutil.rmtree(upload_dir, ignore_errors=True)
+                removed += 1
+            except OSError:
+                continue
+        if removed:
+            logging.getLogger("autoedit").info(
+                "Startup: removed %d abandoned upload temp dir(s)", removed
+            )
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         run_migrations(app_engine)
         _upsert_operator_user()
+        _recover_orphaned_pipelines()
+        _sweep_stale_uploads()
         yield
 
     app = FastAPI(title="AUTOEDIT", version="0.1.0", lifespan=lifespan)
@@ -488,13 +567,33 @@ def create_app(
         }
 
     def _require_admin(request: Request) -> None:
-        session_data = getattr(request.state, "session", {}) or {}
-        if session_data.get("role", "admin") != "admin":
+        # When auth is disabled there is no session gate; treat as operator/admin.
+        if not app_auth_enabled:
+            return
+        session_data = getattr(request.state, "session", None) or {}
+        # Fail closed: a session without an explicit admin role is not an admin.
+        if session_data.get("role") != "admin":
             raise HTTPException(status_code=403, detail="admin role required")
+
+    def _login_client_key(request: Request) -> str:
+        """Rate-limit key for the real client, not the reverse proxy.
+
+        Behind Nginx Proxy Manager every request arrives from the proxy's IP,
+        so keying on request.client.host would create one shared lockout
+        bucket for the whole internet. NPM sets X-Forwarded-For; use the
+        first (client) hop when present. Direct LAN requests have no XFF
+        header and fall back to the socket peer address.
+        """
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            first_hop = forwarded.split(",")[0].strip()
+            if first_hop:
+                return first_hop
+        return request.client.host if request.client else "unknown"
 
     @app.post("/auth/login", status_code=status.HTTP_204_NO_CONTENT)
     def login(payload: LoginRequest, request: Request) -> Response:
-        client_key = request.client.host if request.client else "unknown"
+        client_key = _login_client_key(request)
         if not login_limiter.is_allowed(client_key):
             raise HTTPException(status_code=429, detail="too many failed login attempts")
 
@@ -624,13 +723,16 @@ def create_app(
         return project
 
     @app.delete("/projects/{project_id}")
-    def delete_project(project_id: str, confirm: str = "") -> dict:
+    def delete_project(project_id: str, request: Request, confirm: str = "") -> dict:
         """Delete a project and all its data.
 
+        Admin-only: deletion permanently removes source media, proxies,
+        transcripts, and exports, so reviewer accounts may not do it.
         Safety switch: requires ?confirm=DELETE to prevent accidents.
         Removes the project directory (all source files, proxies, audio,
         transcripts, exports) and all related DB rows.
         """
+        _require_admin(request)
         if confirm != "DELETE":
             raise HTTPException(
                 status_code=400,
@@ -734,11 +836,12 @@ def create_app(
         if project is None:
             raise HTTPException(status_code=404, detail="project not found")
 
-        # Check state
-        if project.get("status") not in ("created", "ingesting"):
+        # Check state. 'error' is allowed so the UI's "Retry processing"
+        # button can restart a failed pipeline (previously it always 400'd).
+        if project.get("status") not in ("created", "ingesting", "error"):
             raise HTTPException(
                 status_code=400,
-                detail=f"project status is '{project.get('status')}' — expected 'created' or 'ingesting'",
+                detail=f"project status is '{project.get('status')}' — expected 'created', 'ingesting', or 'error'",
             )
 
         # Verify minimum requirements: channels mapped
@@ -1377,7 +1480,6 @@ def create_app(
         if export_format not in ("fcpxml", "edl"):
             raise HTTPException(status_code=400, detail="export_format must be 'fcpxml' or 'edl'")
 
-        from autoedit.cdl_validator import validate_cdl
         from autoedit.fcpxml_writer import write_fcpxml
         from autoedit.edl_writer import write_edl
 
@@ -2071,7 +2173,7 @@ def create_app(
 
     @app.get("/projects/{project_id}/media/{kind}/{filename:path}")
     def stream_media(project_id: str, kind: str, filename: str, request: Request):
-        if kind not in ("proxy", "proxy_low", "audio", "lut"):
+        if kind not in ("proxy", "proxy_low", "audio", "lut", "edit"):
             raise HTTPException(status_code=400, detail="invalid media kind")
 
         project = get_project_record(app_engine, project_id)
@@ -2309,7 +2411,11 @@ def create_app(
                     continue
 
                 intervals = [
-                    {"start_ms": int(si.start_ms), "end_ms": int(si.end_ms)}
+                    {
+                        "start_ms": int(si.start_ms),
+                        "end_ms": int(si.end_ms),
+                        "mean_db": float(si.mean_db) if si.mean_db is not None else None,
+                    }
                     for si in si_rows
                 ]
                 channel_intervals.append({
@@ -2324,7 +2430,13 @@ def create_app(
         if not channel_intervals:
             raise HTTPException(
                 status_code=400,
-                detail="no speaking intervals found — run /intervals first",
+                detail=(
+                    "no speech was detected in any mapped audio channel. "
+                    "Check that the correct channels are mapped and that the "
+                    "recordings contain audible speech above the noise floor. "
+                    "If processing was interrupted, retry it so the VAD "
+                    "intervals stage runs again."
+                ),
             )
 
         timeline = compute_activity_timeline(channel_intervals, total_duration_ms=max_end)
@@ -2454,6 +2566,55 @@ def create_app(
             params=cut_params,
         )
         cdl["project_id"] = project_id
+
+        # ── Clamp trailing clips to available source media ────────────
+        # The activity timeline extends to the end of the longest audio
+        # channel, but a clip's assigned angle (often the wide) may have
+        # stopped recording earlier, or a sync offset may shift its source
+        # range past the end of the file. NLEs render such over-runs as
+        # black gaps in the edit. Trim the timeline tail so the last clip
+        # never references source media past its probed duration; only the
+        # tail is touched, so clip contiguity is preserved.
+        angle_duration_ms = {
+            a.id: int(a.duration_ms) for a in angle_rows if a.duration_ms
+        }
+        fnum, fden = project["fps_num"], project["fps_den"]
+        clips_list = cdl.get("clips", [])
+        while clips_list:
+            last = clips_list[-1]
+            media_ms = angle_duration_ms.get(last["angle_id"])
+            if media_ms is None:
+                break
+            available = media_ms - last["src_in_ms"]
+            if last["dur_ms"] <= available:
+                break
+            # Snap the clip END down onto the canonical frame grid (the same
+            # grid the cut engine and validator use), keeping it within the
+            # available media. Flooring the duration onto a raw frame grid
+            # here would leave the end off-grid at NTSC rates and fail the
+            # validator's boundary check at export time.
+            max_end_ms = last["timeline_in_ms"] + available
+            end_frame = (max_end_ms * fnum) // (fden * 1000)
+            end_ms = frame_boundary_ms(end_frame, fnum, fden)
+            while end_ms > max_end_ms and end_frame > 0:
+                end_frame -= 1
+                end_ms = frame_boundary_ms(end_frame, fnum, fden)
+            clamped = end_ms - last["timeline_in_ms"]
+            if clamped > 0:
+                last["dur_ms"] = clamped
+                break
+            clips_list.pop()  # Entirely past media end; expose the previous clip.
+
+        # Surface any remaining source-bounds problems (e.g. a mid-timeline
+        # clip overrunning a short angle) as a warning the UI can show,
+        # rather than leaving them to appear as black gaps in Resolve.
+        cut_validation = validate_cdl(
+            cdl,
+            project["fps_num"],
+            project["fps_den"],
+            source_durations_ms=angle_duration_ms,
+        )
+        cdl["validation"] = cut_validation
 
         # Write edit/cdl.json
         edit_dir = project_dir / "edit"
@@ -2666,6 +2827,7 @@ def create_app(
             )
 
         from autoedit.topics import mock_segment_topics
+
         result = mock_segment_topics(segments)
 
         topics_list = result.get("topics", [])

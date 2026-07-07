@@ -18,7 +18,10 @@ class LLMClient:
         self.settings = settings or Settings()
         self.base_url = self.settings.ollama_base_url.rstrip("/")
         self.model = self.settings.llm_model
-        self.timeout = 120.0  # 2 minutes for large prompts
+        # Long read timeout for large prompts, but fail fast if Ollama is
+        # unreachable so callers hit their deterministic fallbacks in
+        # seconds instead of blocking the pipeline for 2 minutes per call.
+        self.timeout = httpx.Timeout(120.0, connect=5.0)
 
     def _build_messages(self, system: str, user: str) -> list[dict[str, str]]:
         """Build messages array for Ollama chat API."""

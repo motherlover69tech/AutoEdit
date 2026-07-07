@@ -34,7 +34,11 @@
     const box = document.getElementById('loginBox');
     const submitBtn = document.getElementById('submitBtn');
     const params = new URLSearchParams(window.location.search);
-    const next = params.get('next') || '/';
+    // Only allow same-origin relative paths: must start with a single '/'.
+    // Rejects absolute URLs ("https://evil.example") and protocol-relative
+    // URLs ("//evil.example") to prevent open-redirect phishing.
+    const rawNext = params.get('next') || '/';
+    const next = (rawNext.startsWith('/') && !rawNext.startsWith('//')) ? rawNext : '/';
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();

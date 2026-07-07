@@ -40,12 +40,15 @@ def compute_activity_timeline(
     sorted_bounds = sorted(boundaries)
 
     # Build interval index per speaker for fast overlap checks
-    speaker_intervals: dict[str, list[tuple[int, int]]] = {}
+    speaker_intervals: dict[str, list[tuple[int, int, float | None]]] = {}
     speaker_labels: dict[str, str] = {}
     for ch in channel_intervals:
         lid = ch["speaker_label"]
         speaker_labels[ch["channel_id"]] = lid
-        intervals_list = [(iv["start_ms"], iv["end_ms"]) for iv in ch["intervals"]]
+        intervals_list = [
+            (iv["start_ms"], iv["end_ms"], iv.get("mean_db"))
+            for iv in ch["intervals"]
+        ]
         if intervals_list:
             speaker_intervals[ch["channel_id"]] = intervals_list
 
@@ -58,18 +61,28 @@ def compute_activity_timeline(
             continue
 
         active = []
+        levels: dict[str, float] = {}
         mid = (t_start + t_end) // 2
         for ch_id, intervals in speaker_intervals.items():
-            for s, e in intervals:
+            for s, e, mean_db in intervals:
                 if s <= mid < e:
-                    active.append(speaker_labels[ch_id])
+                    label = speaker_labels[ch_id]
+                    active.append(label)
+                    if mean_db is not None:
+                        # Per-speaker level lets the cut engine tell real
+                        # simultaneous speech from cross-mic bleed (bleed
+                        # sits well below the true speaker's level).
+                        levels[label] = float(mean_db)
                     break
 
-        timeline.append({
+        seg: dict[str, Any] = {
             "start_ms": t_start,
             "end_ms": t_end,
             "active": sorted(active),
-        })
+        }
+        if levels:
+            seg["levels"] = levels
+        timeline.append(seg)
 
     # Merge consecutive segments with identical active sets
     if not timeline:
@@ -80,11 +93,19 @@ def compute_activity_timeline(
     for seg in timeline[1:]:
         prev = merged[-1]
         if prev["active"] == seg["active"]:
-            merged[-1] = {
+            combined: dict[str, Any] = {
                 "start_ms": prev["start_ms"],
                 "end_ms": seg["end_ms"],
                 "active": prev["active"],
             }
+            # Keep the louder reading per speaker across the merged span.
+            levels: dict[str, float] = {}
+            for part in (prev, seg):
+                for spk, db in part.get("levels", {}).items():
+                    levels[spk] = max(db, levels[spk]) if spk in levels else db
+            if levels:
+                combined["levels"] = levels
+            merged[-1] = combined
         else:
             merged.append(seg)
 

@@ -1,15 +1,42 @@
 from __future__ import annotations
 
-import math
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 
+def _ms_to_frames(t_ms: int, fps_num: int, fps_den: int) -> int:
+    """Convert a millisecond timeline position to a whole frame index."""
+    return round(t_ms * fps_num / (fps_den * 1000))
+
+
 def _to_rational_seconds(t_ms: int, fps_num: int, fps_den: int) -> str:
     """Convert frame-exact integer ms to a rational seconds string."""
-    frames = round(t_ms * fps_num / (fps_den * 1000))
+    frames = _ms_to_frames(t_ms, fps_num, fps_den)
     num = frames * fps_den
     return f"{num}/{fps_num}s"
+
+
+def _span_to_rational(start_ms: int, end_ms: int, fps_num: int, fps_den: int) -> tuple[str, str, int]:
+    """Convert a [start_ms, end_ms) span to (offset, duration) rationals.
+
+    Both boundaries are converted to frame indices and the duration is the
+    DIFFERENCE of those indices. Converting offset and duration to frames
+    independently (round(start) + round(dur) != round(start + dur)) is the
+    same rounding bug that once produced one-frame gaps/overlaps between
+    adjacent clips in Resolve; deriving durations from shared boundaries
+    makes adjacent spans frame-contiguous by construction, even if the
+    input CDL is not perfectly frame-snapped.
+
+    Returns (offset_rational, duration_rational, duration_frames).
+    """
+    start_f = _ms_to_frames(start_ms, fps_num, fps_den)
+    end_f = _ms_to_frames(end_ms, fps_num, fps_den)
+    dur_f = end_f - start_f
+    return (
+        f"{start_f * fps_den}/{fps_num}s",
+        f"{dur_f * fps_den}/{fps_num}s",
+        dur_f,
+    )
 
 
 def _frames_to_rational(frames: int, fps_num: int, fps_den: int) -> str:
@@ -36,7 +63,6 @@ def write_fcpxml(
     """
     clips = cdl.get("clips", [])
 
-    angle_by_id = {a["id"]: a for a in angles}
     angle_order = sorted(angles, key=lambda a: a["id"])
     lane_by_angle = {a["id"]: i for i, a in enumerate(angle_order)}
 
@@ -59,6 +85,7 @@ def write_fcpxml(
                 "angle_id": clip["angle_id"],
                 "src_in_ms": clip["src_in_ms"],
                 "dur_ms": clip["dur_ms"],
+                "end_ms": clip["timeline_in_ms"] + clip["dur_ms"],
             }))
     else:
         if clips:
@@ -89,6 +116,7 @@ def write_fcpxml(
                         "angle_id": aid,
                         "src_in_ms": src_in,
                         "dur_ms": w_dur,
+                        "end_ms": w_end,
                         "lane": lane,
                     }))
 
@@ -150,26 +178,36 @@ def write_fcpxml(
     # Emit spine items in timeline order
     for t_ms, item_type, data in spine_items:
         if item_type == "clip":
+            offset_r, dur_r, dur_f = _span_to_rational(
+                t_ms, data["end_ms"], project_fps_num, project_fps_den
+            )
+            if dur_f <= 0:
+                continue  # span collapsed to zero frames after snapping
             ET.SubElement(spine, "asset-clip", {
                 "ref": used_angle_ids[data["angle_id"]],
-                "offset": _to_rational_seconds(t_ms, project_fps_num, project_fps_den),
+                "offset": offset_r,
                 "start": _to_rational_seconds(data["src_in_ms"], project_fps_num, project_fps_den),
-                "duration": _to_rational_seconds(data["dur_ms"], project_fps_num, project_fps_den),
+                "duration": dur_r,
             })
         elif item_type == "lane_clip":
+            offset_r, dur_r, dur_f = _span_to_rational(
+                t_ms, data["end_ms"], project_fps_num, project_fps_den
+            )
+            if dur_f <= 0:
+                continue
             if data["active"]:
                 ET.SubElement(spine, "asset-clip", {
                     "ref": used_angle_ids[data["angle_id"]],
-                    "offset": _to_rational_seconds(t_ms, project_fps_num, project_fps_den),
+                    "offset": offset_r,
                     "start": _to_rational_seconds(data["src_in_ms"], project_fps_num, project_fps_den),
-                    "duration": _to_rational_seconds(data["dur_ms"], project_fps_num, project_fps_den),
+                    "duration": dur_r,
                     "lane": str(data["lane"]),
                 })
             else:
                 ET.SubElement(spine, "gap", {
-                    "offset": _to_rational_seconds(t_ms, project_fps_num, project_fps_den),
+                    "offset": offset_r,
                     "start": "0s",
-                    "duration": _to_rational_seconds(data["dur_ms"], project_fps_num, project_fps_den),
+                    "duration": dur_r,
                     "lane": str(data["lane"]),
                 })
         elif item_type == "marker":

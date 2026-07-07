@@ -25,11 +25,20 @@ export function videoTimeForAngle(angle, timelineMs) {
 }
 
 export function playbackVideoTimeForClip(clip, timelineMs, manualNudgeMs = 0) {
-  return videoTimeForClip(clip, timelineMs) - (Number(manualNudgeMs || 0) / 1000);
+  if (!clip) return 0;
+  // Keep all arithmetic in integer milliseconds and divide once, so seek
+  // times land exactly on ms boundaries instead of accumulating IEEE754
+  // error (1.15 - 0.1 === 1.0499999999999998).
+  return (timelineMs - clip.timeline_in_ms + clip.src_in_ms - Number(manualNudgeMs || 0)) / 1000;
 }
 
 export function playbackVideoTimeForAngle(angle, timelineMs, manualNudgeMs = 0) {
-  return videoTimeForAngle(angle, timelineMs) - (Number(manualNudgeMs || 0) / 1000);
+  if (!angle) return 0;
+  return (
+    Number(timelineMs || 0)
+    + Number(angle.source_time_offset_ms || 0)
+    - Number(manualNudgeMs || 0)
+  ) / 1000;
 }
 
 export function frameDurationSeconds(fpsNum, fpsDen) {
@@ -1388,7 +1397,10 @@ function loadCutParams(projectId, elements, statePayload, clips, angleById, over
   const tailInput = document.getElementById("cutTailMs");
   const silenceSelect = document.getElementById("cutSilenceBehaviour");
   const wideIntervalInput = document.getElementById("cutWideIntervalMs");
+  const overlapMinInput = document.getElementById("cutOverlapMinMs");
+  const interjectInput = document.getElementById("cutInterjectMaxMs");
   const directPresetBtn = document.getElementById("cutPresetDirect");
+  const steadyPresetBtn = document.getElementById("cutPresetSteady");
   const looserPresetBtn = document.getElementById("cutPresetLooser");
   const regenBtn = document.getElementById("regenerateCutBtn");
   const statusEl = document.getElementById("cutRegenStatus");
@@ -1400,6 +1412,8 @@ function loadCutParams(projectId, elements, statePayload, clips, angleById, over
     if (tailInput) tailInput.value = params.tail_ms ?? 0;
     if (silenceSelect) silenceSelect.value = params.silence_behaviour || "wide";
     if (wideIntervalInput) wideIntervalInput.value = params.wide_interval_ms ?? 0;
+    if (overlapMinInput) overlapMinInput.value = params.overlap_min_ms ?? 900;
+    if (interjectInput) interjectInput.value = params.interject_max_ms ?? 1200;
   }
 
   // Load current params from player-state; do not regenerate just to populate controls.
@@ -1413,6 +1427,10 @@ function loadCutParams(projectId, elements, statePayload, clips, angleById, over
       tail_ms: 0,
       silence_behaviour: "wide",
       wide_interval_ms: 0,
+      overlap_min_ms: 0,
+      interject_max_ms: 0,
+      dominance_db: 0,
+      exchange_min_turns: 0,
     }));
   }
 
@@ -1424,6 +1442,21 @@ function loadCutParams(projectId, elements, statePayload, clips, angleById, over
       tail_ms: 150,
       silence_behaviour: "wide",
       wide_interval_ms: 45000,
+      overlap_min_ms: 1200,
+      interject_max_ms: 1500,
+    }));
+  }
+
+  if (steadyPresetBtn) {
+    steadyPresetBtn.addEventListener("click", () => applyPreset({
+      overlap_to_wide: true,
+      min_shot_ms: 250,
+      lead_in_ms: 0,
+      tail_ms: 0,
+      silence_behaviour: "wide",
+      wide_interval_ms: 0,
+      overlap_min_ms: 900,
+      interject_max_ms: 1200,
     }));
   }
 
@@ -1440,6 +1473,8 @@ function loadCutParams(projectId, elements, statePayload, clips, angleById, over
           tail_ms: parseInt(tailInput.value, 10) || 0,
           silence_behaviour: silenceSelect.value || "wide",
           wide_interval_ms: parseInt(wideIntervalInput.value, 10) || 0,
+          overlap_min_ms: overlapMinInput ? (parseInt(overlapMinInput.value, 10) || 0) : 900,
+          interject_max_ms: interjectInput ? (parseInt(interjectInput.value, 10) || 0) : 1200,
         };
         const res = await fetch(`/projects/${projectId}/cut`, {
           method: "POST",
@@ -1470,6 +1505,57 @@ function loadCutParams(projectId, elements, statePayload, clips, angleById, over
       }
     });
   }
+
+  // ── Export controls ────────────────────────────────────────
+  const exportStatusEl = document.getElementById("exportStatus");
+
+  function wireExport(buttonId, format, idleLabel) {
+    const btn = document.getElementById(buttonId);
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      btn.textContent = "Exporting…";
+      if (exportStatusEl) exportStatusEl.textContent = "";
+      try {
+        const res = await fetch(`/projects/${projectId}/export`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ export_format: format }),
+        });
+        const data = await res.json();
+        if (res.ok && data.url) {
+          if (exportStatusEl) {
+            exportStatusEl.textContent = `Exported ${format.toUpperCase()}`;
+            exportStatusEl.style.color = "var(--ok)";
+          }
+          // Trigger the browser download from the media URL the API returned.
+          const link = document.createElement("a");
+          link.href = data.url;
+          link.download = data.url.split("/").pop() || `export.${format}`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        } else {
+          if (exportStatusEl) {
+            exportStatusEl.textContent = `Failed: ${data.detail || res.status}`;
+            exportStatusEl.style.color = "var(--err)";
+          }
+        }
+      } catch (_err) {
+        if (exportStatusEl) {
+          exportStatusEl.textContent = "Export failed";
+          exportStatusEl.style.color = "var(--err)";
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = idleLabel;
+      }
+    });
+  }
+
+  wireExport("exportFcpxmlBtn", "fcpxml", "Export FCPXML");
+  wireExport("exportEdlBtn", "edl", "Export EDL");
 }
 
 // ── Window bootstrap ────────────────────────────────────────

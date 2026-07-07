@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
+
+from autoedit.ffproc import run_ffmpeg_watchdog
 
 
 def generate_proxy(
@@ -77,7 +77,9 @@ def generate_proxy(
         plog.cmd("proxy", cmd)
 
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        # Watchdog: previously this had NO timeout, so a stalled encoder
+        # (e.g. a wedged VAAPI device) hung the pipeline forever.
+        result = run_ffmpeg_watchdog(cmd)
     except FileNotFoundError as exc:
         raise RuntimeError("ffmpeg executable not found") from exc
 

@@ -157,9 +157,10 @@
       <!-- Cut Parameters Panel -->
       <section class="cut-params-panel" aria-label="Cut engine parameters">
         <h2>Cut Parameters</h2>
-        <p class="mono-note">Direct is the baseline: cut as soon as one speaker becomes active, cut wide for overlap or silence. Use Looser only if the direct cut feels twitchy.</p>
+        <p class="mono-note">Steady (default) cuts to the current speaker, absorbs backchannel and brief overlaps, and holds wide during rapid exchanges or genuinely simultaneous speech. Direct is the legacy per-VAD-edge cut. Looser adds longer shots and periodic wides.</p>
         <div class="lut-actions" style="margin-bottom:12px">
-          <button id="cutPresetDirect" type="button" class="ghost btn-sm">Direct preset</button>
+          <button id="cutPresetSteady" type="button" class="ghost btn-sm">Steady preset</button>
+          <button id="cutPresetDirect" type="button" class="ghost btn-sm" style="margin-left:8px">Direct preset</button>
           <button id="cutPresetLooser" type="button" class="ghost btn-sm" style="margin-left:8px">Looser preset</button>
         </div>
         
@@ -184,6 +185,14 @@
             <input type="number" id="cutTailMs" value="0" min="0" step="10">
           </div>
           <div class="field">
+            <label for="cutOverlapMinMs">Wide only if overlap ≥ (ms)</label>
+            <input type="number" id="cutOverlapMinMs" value="900" min="0" step="100">
+          </div>
+          <div class="field">
+            <label for="cutInterjectMaxMs">Ignore interjections ≤ (ms)</label>
+            <input type="number" id="cutInterjectMaxMs" value="1200" min="0" step="100">
+          </div>
+          <div class="field">
             <label for="cutSilenceBehaviour">Silence behaviour</label>
             <select id="cutSilenceBehaviour">
               <option value="wide" selected>Cut to wide</option>
@@ -200,9 +209,20 @@
           <span id="cutRegenStatus" class="mono-note" style="margin-left:12px"></span>
         </div>
       </section>
+
+      <!-- Export Panel -->
+      <section class="cut-params-panel" aria-label="Export controls">
+        <h2>Export</h2>
+        <p class="mono-note">FCPXML carries the multicam timeline for Resolve. EDL carries the cut plus notes as locator markers (Resolve ignores FCPXML markers).</p>
+        <div class="lut-actions">
+          <button id="exportFcpxmlBtn" type="button" class="primary">Export FCPXML</button>
+          <button id="exportEdlBtn" type="button" class="ghost btn-sm" style="margin-left:8px">Export EDL</button>
+          <span id="exportStatus" class="mono-note" style="margin-left:12px"></span>
+        </div>
+      </section>
       </div><!-- end playerShell -->
     </main>
 
-    <script type="module" src="/web/player.js?v=4"></script>
+    <script type="module" src="/web/player.js?v=6"></script>
   </body>
 </html>
