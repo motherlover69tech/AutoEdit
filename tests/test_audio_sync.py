@@ -767,6 +767,30 @@ def test_sync_endpoint_does_not_compound_previous_auto_sync(auth_client):
     assert sorted(o["offset_ms"] for o in second.json()["offsets"]) == [0, 50]
 
 
+def test_sync_endpoint_discards_large_stale_offset_on_new_reference(auth_client):
+    client, data_root, engine = auth_client
+    _, _, _, project_body, angle_a_id, _angle_b_id = _setup_channels_and_media(
+        auth_client, data_root, delay_ms=50,
+    )
+    pid = project_body["id"]
+    with Session(engine) as session:
+        session.execute(
+            angles.update().where(angles.c.id == angle_a_id).values(sync_offset_ms=71880)
+        )
+        session.commit()
+
+    sync_fn = _mock_compute_sync(50)
+    app = create_app(engine=engine, data_root=data_root, auth_enabled=False, sync_fn=sync_fn)
+    test_client = TestClient(app)
+
+    with patch("autoedit.audio.run_ffmpeg_watchdog", side_effect=_mock_subprocess_for_ffmpeg(data_root, pid)):
+        response = test_client.post(f"/projects/{pid}/sync")
+
+    assert response.status_code == 200
+    by_id = {item["angle_id"]: item["offset_ms"] for item in response.json()["offsets"]}
+    assert by_id[angle_a_id] == 0
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 

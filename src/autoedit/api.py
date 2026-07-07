@@ -1939,8 +1939,12 @@ def create_app(
         for angle_id in angle_ids:
             computed_offset = int(offsets.get(angle_id, 0))
             existing_offset = int(nudge_by_angle.get(angle_id, 0))
-            nudge = existing_offset
-            if existing_offset == 0:
+            if computed_offset == 0:
+                # Reference angle: keep only small explicit manual nudges.
+                # Large values are stale auto-sync from a previous reference
+                # choice and must not be preserved as a nudge.
+                nudge = existing_offset if abs(existing_offset) <= 2000 else 0
+            elif existing_offset == 0:
                 nudge = 0
             elif abs(existing_offset) <= 2000 and (
                 abs(computed_offset) > 2000 or abs(existing_offset) < abs(computed_offset)
