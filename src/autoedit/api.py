@@ -984,11 +984,20 @@ def create_app(
             )
 
         with Session(app_engine) as session:
-            rough_cut = session.execute(
-                select(cuts)
+            latest_rough_cut_id = session.execute(
+                select(cuts.c.id)
                 .where(cuts.c.project_id == project_id, cuts.c.kind == "rough")
                 .order_by(cuts.c.created_at.desc(), cuts.c.id.desc())
-            ).first()
+                .limit(1)
+            ).scalar_one_or_none()
+            rough_cut = None
+            if latest_rough_cut_id is not None:
+                # MySQL can run out of sort memory when ORDER BY is applied to
+                # rows that include large JSON columns (cdl_json). Sort only
+                # narrow metadata first, then fetch the single selected cut.
+                rough_cut = session.execute(
+                    select(cuts).where(cuts.c.id == latest_rough_cut_id)
+                ).first()
             angle_rows = session.execute(
                 select(angles)
                 .where(angles.c.project_id == project_id)

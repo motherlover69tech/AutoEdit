@@ -141,6 +141,7 @@ cuts = Table(
     Column("params_json", JSON, nullable=False),
     Column("cdl_json", JSON, nullable=False),
     Column("created_at", DateTime, nullable=False, server_default=func.now()),
+    Index("ix_cuts_project_kind_created", "project_id", "kind", "created_at", "id"),
 )
 
 notes = Table(

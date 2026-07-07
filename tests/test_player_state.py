@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -260,6 +261,44 @@ def test_player_state_returns_frontend_bootstrap_payload(app_context):
     assert "proxy_low_url" not in angle_b
     assert angle_b["sync_offset_ms"] == 100
     assert angle_b["source_time_offset_ms"] == 0
+
+
+def test_player_state_uses_latest_rough_cut_without_sorting_cdl_payload(app_context):
+    client, data_root, engine = app_context
+    seeded = _seed_player_project(client, data_root, engine)
+    latest_cdl = {
+        **seeded["cdl"],
+        "clips": [
+            {
+                "angle_id": seeded["angle_a"],
+                "src_in_ms": 0,
+                "timeline_in_ms": 0,
+                "dur_ms": 1000,
+                "reason": "latest:rough",
+            }
+        ],
+    }
+
+    with Session(engine) as session:
+        session.execute(
+            cuts.insert().values(
+                id=new_ulid(),
+                project_id=seeded["project_id"],
+                name="Latest rough cut",
+                kind="rough",
+                params_json={"min_shot_ms": 900},
+                cdl_json=latest_cdl,
+                created_at=datetime(2030, 1, 1, 12, 0, 0),
+            )
+        )
+        session.commit()
+
+    response = client.get(f"/projects/{seeded['project_id']}/player-state")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cut"]["name"] == "Latest rough cut"
+    assert body["cut"]["clips"] == latest_cdl["clips"]
 
 
 def test_player_state_urls_do_not_expose_data_root(app_context):
