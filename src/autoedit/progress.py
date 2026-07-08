@@ -36,6 +36,11 @@ PIPELINE_STAGES = [
         "description": "10th-percentile floor + 8dB VAD threshold",
     },
     {
+        "key": "level_normalization",
+        "label": "Level normalization",
+        "description": "Analysis gain offsets for uneven mic levels",
+    },
+    {
         "key": "diarize",
         "label": "Speaker diarization",
         "description": "Speaker identification from audio",
@@ -165,6 +170,7 @@ def _check_stage_done(engine, project_dir: Path, project_id: str, key: str) -> b
         "sync": lambda: _check_sync(project_dir, engine, project_id),
         "loudness": lambda: (project_dir / "audio" / "loudness.json").is_file(),
         "noise_floor": lambda: _check_noise_floor(engine, project_id),
+        "level_normalization": lambda: (project_dir / "audio" / "level_normalization.json").is_file(),
         "diarize": lambda: (project_dir / "audio" / "diarization.json").is_file(),
         "intervals": lambda: _check_intervals(engine, project_id),
         "activity": lambda: (project_dir / "audio" / "activity.json").is_file(),

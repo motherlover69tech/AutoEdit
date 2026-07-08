@@ -174,6 +174,39 @@ def test_activity_timeline_overlap():
     assert timeline[3] == {"start_ms": 5000, "end_ms": 7000, "active": ["interviewee"]}
 
 
+def test_activity_timeline_applies_analysis_level_gain_to_levels():
+    """Activity levels used by cut dominance are normalized, not raw mic dBFS."""
+    from autoedit.activity import compute_activity_timeline
+
+    intervals = [
+        {
+            "channel_id": "hot",
+            "speaker_label": "presenter",
+            "intervals": [
+                {"start_ms": 0, "end_ms": 1000, "mean_db": -38.0, "level_gain_db": -8.0},
+            ],
+        },
+        {
+            "channel_id": "quiet",
+            "speaker_label": "interviewee",
+            "intervals": [
+                {"start_ms": 0, "end_ms": 1000, "mean_db": -44.0, "level_gain_db": 8.0},
+            ],
+        },
+    ]
+
+    timeline = compute_activity_timeline(intervals)
+
+    assert timeline == [{
+        "start_ms": 0,
+        "end_ms": 1000,
+        "active": ["interviewee", "presenter"],
+        "levels": {"interviewee": -36.0, "presenter": -46.0},
+        "raw_levels": {"interviewee": -44.0, "presenter": -38.0},
+        "level_gains_db": {"interviewee": 8.0, "presenter": -8.0},
+    }]
+
+
 def test_activity_timeline_contiguous():
     """Timeline covers from 0 to max end_ms without gaps."""
     from autoedit.activity import compute_activity_timeline

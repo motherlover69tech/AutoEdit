@@ -39,16 +39,28 @@ def compute_activity_timeline(
 
     sorted_bounds = sorted(boundaries)
 
-    # Build interval index per speaker for fast overlap checks
-    speaker_intervals: dict[str, list[tuple[int, int, float | None]]] = {}
+    # Build interval index per speaker for fast overlap checks.  ``mean_db`` is
+    # analysis-normalized when callers provide ``level_gain_db``; raw levels and
+    # gains are carried through for audit/debugging in activity.json.
+    speaker_intervals: dict[str, list[tuple[int, int, float | None, float | None, float]]] = {}
     speaker_labels: dict[str, str] = {}
     for ch in channel_intervals:
         lid = ch["speaker_label"]
         speaker_labels[ch["channel_id"]] = lid
-        intervals_list = [
-            (iv["start_ms"], iv["end_ms"], iv.get("mean_db"))
-            for iv in ch["intervals"]
-        ]
+        intervals_list = []
+        for iv in ch["intervals"]:
+            raw_mean_db = iv.get("mean_db")
+            gain_db = float(iv.get("level_gain_db") or 0.0)
+            adjusted_mean_db = None
+            if raw_mean_db is not None:
+                adjusted_mean_db = float(raw_mean_db) + gain_db
+            intervals_list.append((
+                iv["start_ms"],
+                iv["end_ms"],
+                adjusted_mean_db,
+                float(raw_mean_db) if raw_mean_db is not None else None,
+                gain_db,
+            ))
         if intervals_list:
             speaker_intervals[ch["channel_id"]] = intervals_list
 
@@ -62,17 +74,24 @@ def compute_activity_timeline(
 
         active = []
         levels: dict[str, float] = {}
+        raw_levels: dict[str, float] = {}
+        level_gains: dict[str, float] = {}
         mid = (t_start + t_end) // 2
         for ch_id, intervals in speaker_intervals.items():
-            for s, e, mean_db in intervals:
+            for s, e, mean_db, raw_mean_db, gain_db in intervals:
                 if s <= mid < e:
                     label = speaker_labels[ch_id]
                     active.append(label)
                     if mean_db is not None:
                         # Per-speaker level lets the cut engine tell real
                         # simultaneous speech from cross-mic bleed (bleed
-                        # sits well below the true speaker's level).
+                        # sits well below the true speaker's level).  These
+                        # levels are normalized to compensate for uneven mics.
                         levels[label] = float(mean_db)
+                    if raw_mean_db is not None:
+                        raw_levels[label] = float(raw_mean_db)
+                    if gain_db:
+                        level_gains[label] = float(gain_db)
                     break
 
         seg: dict[str, Any] = {
@@ -82,6 +101,10 @@ def compute_activity_timeline(
         }
         if levels:
             seg["levels"] = levels
+        if raw_levels:
+            seg["raw_levels"] = raw_levels
+        if level_gains:
+            seg["level_gains_db"] = level_gains
         timeline.append(seg)
 
     # Merge consecutive segments with identical active sets
@@ -105,6 +128,18 @@ def compute_activity_timeline(
                     levels[spk] = max(db, levels[spk]) if spk in levels else db
             if levels:
                 combined["levels"] = levels
+            raw_levels: dict[str, float] = {}
+            for part in (prev, seg):
+                for spk, db in part.get("raw_levels", {}).items():
+                    raw_levels[spk] = max(db, raw_levels[spk]) if spk in raw_levels else db
+            if raw_levels:
+                combined["raw_levels"] = raw_levels
+            level_gains: dict[str, float] = {}
+            for part in (prev, seg):
+                for spk, gain in part.get("level_gains_db", {}).items():
+                    level_gains[spk] = float(gain)
+            if level_gains:
+                combined["level_gains_db"] = level_gains
             merged[-1] = combined
         else:
             merged.append(seg)

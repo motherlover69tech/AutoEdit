@@ -4,7 +4,7 @@ This plan expands Appendix D of the source spec. Every implementation stage must
 
 ## Current verification checkpoint
 
-- Local/default command: `env -u VIRTUAL_ENV uv run pytest -q` → latest observed result `438 passed, 2 skipped`.
+- Local/default command: `env -u VIRTUAL_ENV uv run pytest -q` → latest observed result `489 passed, 2 skipped`.
 - Targeted sync command: `env -u VIRTUAL_ENV uv run pytest tests/test_audio_sync.py -q` → latest observed result `18 passed`.
 - Compile sanity command: `env -u VIRTUAL_ENV uv run python -m compileall -q src tests` → passes.
 - MySQL integration skips unless DB env vars are supplied.
@@ -12,6 +12,8 @@ This plan expands Appendix D of the source spec. Every implementation stage must
 - Stage 7.0 deployment is behind Nginx Proxy Manager, not Caddy; docs/config now reflect that.
 - Current local code has mock/template/in-process areas that must remain labelled accurately: transcription, diarization, YouTube titles, and pipeline worker model. Sync low-confidence handling now fails loudly with diagnostics.
 - Auto-cut responsiveness change verified: `env -u VIRTUAL_ENV uv run pytest tests/test_cut_engine.py tests/test_player_state.py -q` → `39 passed` after switching defaults to the Direct profile and adding player-state cut params.
+- Level-normalization stage verified: `env -u VIRTUAL_ENV uv run pytest tests/test_level_normalization.py tests/test_activity.py tests/test_progress.py tests/test_cut_engine.py -q` → `61 passed`; full suite above also passed after adding analysis gain offsets for uneven mic levels.
+- Ingest UI/probe mapping clarification verified: `env -u VIRTUAL_ENV uv run pytest tests/test_probe_channel_mapping.py tests/test_ingest_ui_static.py -q` → `25 passed`; broader web/API subset `tests/test_player_static.py tests/test_security_smoke.py tests/test_probe_channel_mapping.py tests/test_ingest_ui_static.py` → `41 passed`.
 
 ## CONFIG-REVIEW required verification
 

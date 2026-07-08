@@ -257,6 +257,45 @@ def test_probe_updates_angle_with_metadata(project_with_angles):
     assert row.duration_ms == 30030
 
 
+def test_probe_metadata_is_visible_in_assets_after_reload(project_with_angles):
+    """Probe details, especially audio streams, persist for the ingest UI."""
+    project_body, client, _, _, angle_list = project_with_angles
+    pid = project_body["id"]
+    angle_a = angle_list[0]
+    probe_payload = {
+        "width": 1920,
+        "height": 1080,
+        "vcodec": "h264",
+        "src_fps_num": 24000,
+        "src_fps_den": 1001,
+        "duration_ms": 30030,
+        "timecode": None,
+        "timecode_ms": None,
+        "warnings": [],
+        "audio_streams": [
+            {
+                "stream_index": 1,
+                "codec": "aac",
+                "channels": 2,
+                "channel_layout": "stereo",
+                "sample_rate": 48000,
+                "channel_indices": [0, 1],
+            },
+        ],
+    }
+
+    with patch("autoedit.api.probe_source_file", lambda _path: probe_payload):
+        response = client.post(f"/projects/{pid}/angles/{angle_a['id']}/probe")
+
+    assert response.status_code == 200
+    assets = client.get(f"/projects/{pid}/assets")
+    assert assets.status_code == 200
+    body = assets.json()
+    assert body["probes"][angle_a["id"]]["audio_streams"][0]["channels"] == 2
+    angle = next(a for a in body["angles"] if a["id"] == angle_a["id"])
+    assert angle["probe"]["audio_streams"][0]["stream_index"] == 1
+
+
 def test_probe_warns_on_non_1080p(project_with_angles):
     """720p source returns a warning but still records metadata."""
     project_body, client, _, _, angle_list = project_with_angles

@@ -16,9 +16,11 @@ Self-hosted multicam auto-edit platform for three-angle interview footage.
 
 - Backend: Python 3.12 + FastAPI + SQLAlchemy Core + pytest, managed with `uv`.
 - Frontend: Stage 7.4 notes (multi-author markers + list panel + add-note form) + Stage 7.3 per-angle LUT + Stage 7.2 timeline lanes + Stage 7.1 player shell via static web shell.
-- Latest local verification: `env -u VIRTUAL_ENV uv run pytest -q` → **438 passed, 2 skipped**.
+- Latest local verification: `env -u VIRTUAL_ENV uv run pytest -q` → **489 passed, 2 skipped**.
 - Compile check: `python -m compileall -q src tests` passes.
 - Auto-cut Direct defaults are live-deployed on Unraid: `min_shot_ms=250`, no lead/tail delay, overlap→wide, silence→wide. Existing cuts keep stored params until regenerated; `sm test` was regenerated as `Direct rough cut`.
+- Processing now includes an analysis-only `level_normalization` stage after noise-floor. It writes `audio/level_normalization.json` and normalizes activity `levels` for dominance/cross-bleed decisions without altering source WAVs or program audio.
+- Ingest/channel mapping UI now separates camera sources from speaker channels: upload labels are Camera A/B/Wide, probe metadata persists into `/assets`, and audio-channel rows no longer auto-select presenter/interviewee defaults.
 - Stage 7.0 backend auth is implemented and deployed behind NPM. CONFIG-REVIEW is complete: active Unraid deploy uses central MySQL, explicit compose env vars, and NPM.
 - Module 7 (player) code exists; Module 8 export has been verified in Resolve. Some AI/worker features are mock/template/in-process and must not be documented as production-complete until remediated.
 - Export test files: `test_export.fcpxml` (multi-track), `test_export.edl` (with markers).

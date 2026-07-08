@@ -54,10 +54,12 @@ class TestProgressModule:
         # Verify key stages exist in the right positions
         assert keys.index("sync") < keys.index("loudness")
         assert keys.index("loudness") < keys.index("noise_floor")
+        assert keys.index("noise_floor") < keys.index("level_normalization")
+        assert keys.index("level_normalization") < keys.index("intervals")
         assert keys.index("activity") < keys.index("program_audio")
         assert keys.index("transcribe") < keys.index("segment_topics")
         assert keys.index("summary") < keys.index("cut")
-        assert len(keys) == 12
+        assert len(keys) == 13
 
     def test_set_project_status(self, engine, project):
         """set_project_status updates the DB atomically."""
@@ -83,7 +85,7 @@ class TestProgressModule:
         assert progress["project_id"] == project["id"]
         assert progress["status"] == "created"
         assert progress["ready"] is False
-        assert len(progress["stages"]) == 12
+        assert len(progress["stages"]) == 13
 
         # First stage should be 'queued' (not 'running' since status is 'created')
         # All stages should be 'queued'
@@ -132,7 +134,7 @@ class TestProgressAPI:
         assert data["project_id"] == project["id"]
         assert data["status"] == "created"
         assert data["ready"] is False
-        assert len(data["stages"]) == 12
+        assert len(data["stages"]) == 13
         # Verify stage structure
         for stage in data["stages"]:
             assert "key" in stage

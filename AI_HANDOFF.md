@@ -29,13 +29,15 @@ Read those before implementing.
 ## Current implementation state
 
 - Backend stack: Python 3.12 + FastAPI + SQLAlchemy Core + pytest, managed with `uv`.
-- Latest local verification: `env -u VIRTUAL_ENV uv run pytest -q` → **438 passed, 2 skipped**.
+- Latest local verification: `env -u VIRTUAL_ENV uv run pytest -q` → **489 passed, 2 skipped**.
 - Compile check: `python -m compileall -q src tests` passes.
 - Deployed on Unraid: `/mnt/user/appdata/autoedit`, `network_mode: host`, port 8010 behind NPM at `ingest.peteflix.uk`.
 - Central MySQL at `192.168.50.50:3306`, database `autoedit`, user `autoedit`. Password in deployment secrets only.
 - VAAPI hardware proxy encoding active (`PROXY_ENCODER=h264_vaapi`, `/dev/dri` mounted).
 - Quality default is now `proxy` (720p), not `proxy_low`. All three places updated: API, HTML, JS.
 - Auto-cut editorial default is now **Direct** and live-deployed: `min_shot_ms=250`, `lead_in_ms=0`, `tail_ms=0`, `silence_behaviour='wide'`, `overlap_to_wide=true`. Existing projects keep stored `cuts.params_json` until regenerated; live project `sm test` was regenerated as `Direct rough cut`. Loosen only deliberately via higher min-shot/tail/lead or relief wides.
+- New processing stage: `level_normalization` runs after `noise_floor`, writes `audio/level_normalization.json`, and applies analysis-only gain offsets to activity `levels` so cut dominance compares normalized channel levels instead of raw uneven mic dBFS. It does not change source WAVs or `program.m4a`.
+- Ingest/channel mapping UI clarification: Camera A/B/Wide are now neutral source labels, probe results are persisted in `metadata/probes/*.json` and exposed via `/assets`, and the audio mapping table starts blank unless mappings are already saved. Operators must explicitly pick source channel + speaker heard.
 
 ### Stage status table
 

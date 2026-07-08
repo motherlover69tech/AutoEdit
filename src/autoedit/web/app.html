@@ -21,7 +21,7 @@
     <section class="hero">
       <p class="kicker">Multicam Auto-Edit Platform</p>
       <h1 id="pageTitle">The cut writes itself.</h1>
-      <p class="lede" id="pageLede">Create a project, upload three angles, map audio channels, then open the review player.</p>
+      <p class="lede" id="pageLede">Create a project, upload camera sources, choose which audio channels contain each speaker, then open the review player.</p>
       <div class="dotline"></div>
     </section>
 
@@ -32,7 +32,7 @@
       <div class="grid g2">
         <article class="card">
           <h3>Start a new edit</h3>
-          <p class="body-copy">Project setup and media ingest live on one page: project name, frame rate, three angle uploads, then channel mapping.</p>
+          <p class="body-copy">Project setup and media ingest live on one page: project name, frame rate, camera-source uploads, then explicit speaker-channel mapping.</p>
           <p><a class="btn btn-primary" href="/ingest">Create &amp; ingest</a></p>
         </article>
         <article class="card">
@@ -47,8 +47,8 @@
     <section id="ingestView" hidden>
       <div class="flow" aria-label="Ingest flow">
         <div class="step"><span class="n">01</span><b>Create</b><p>Name the project and choose its frame rate.</p></div><div class="arrow">→</div>
-        <div class="step"><span class="n">02</span><b>Upload</b><p>Drop A, B, C. Chunked uploads show exact progress.</p></div><div class="arrow">→</div>
-        <div class="step"><span class="n">03</span><b>Map audio</b><p>Select the speaker channels and sync nudges.</p></div>
+        <div class="step"><span class="n">02</span><b>Upload</b><p>Drop Camera A, Camera B, and Wide. These are camera sources, not speaker labels.</p></div><div class="arrow">→</div>
+        <div class="step"><span class="n">03</span><b>Map audio</b><p>Pick the actual source file/channel for each lav or speaker track.</p></div>
       </div>
 
       <div class="grid g2">
@@ -70,12 +70,12 @@
         </article>
       </div>
 
-      <div class="section-head"><span class="sec-num">04</span><h2>Upload angles</h2></div>
+      <div class="section-head"><span class="sec-num">04</span><h2>Upload camera sources</h2></div>
       <div class="upload-grid" id="uploadGrid"></div>
 
       <div class="section-head"><span class="sec-num">05</span><h2>Audio stream mapping</h2></div>
       <article class="card">
-        <p class="body-copy">Map the two speaker channels that should drive VAD, transcription, and the auto cut. Channel indices are taken from the uploaded source files after probing.</p>
+        <p class="body-copy">Map the audio channels that should drive VAD, transcription, sync, and the auto cut. The camera/source file is only where the audio lives; the speaker label is who is heard on that channel.</p>
         <div id="channelMapping"></div>
         <button id="saveChannelsBtn" type="button" class="primary" disabled>Save channel mapping</button>
         <button id="startProcessBtn" type="button" class="primary" style="display:none;margin-left:12px">Start processing</button>

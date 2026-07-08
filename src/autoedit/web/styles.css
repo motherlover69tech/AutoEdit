@@ -141,6 +141,14 @@ textarea:focus { outline: none; border-color: var(--red); }
 .dropzone h3 { font-family: var(--serif); font-size: 18px; margin-bottom: 8px; }
 .dropzone .progress { height: 4px; background: var(--surface-2); border-radius: 2px; margin: 12px 0 6px; overflow: hidden; }
 .dropzone .progress span { display: block; height: 100%; background: var(--red); transition: width .3s; }
+.source-hint { margin: 6px 0 10px; color: var(--t-low); }
+.probe-summary { margin: 10px 0 12px; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: var(--r-md); background: rgba(247,244,239,.03); font-family: var(--mono); font-size: 11.5px; color: var(--t-mid); line-height: 1.55; }
+.probe-summary.muted { color: var(--t-low); }
+.warn-text { color: var(--warn); }
+.mapping-help { margin: 0 0 16px; padding: 13px 15px; border: 1px solid rgba(201,162,39,.28); border-radius: var(--r-md); background: rgba(201,162,39,.08); color: var(--t-mid); font-size: 13.5px; line-height: 1.55; }
+.mapping-help b { color: var(--t-hi); }
+.channel-table input[list] { min-width: 160px; }
+.channel-table .mono-note { display: inline-block; max-width: 280px; }
 
 /* ── Status line ──────────────────────────────────────── */
 .status-line { padding: 12px var(--pad); font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--line); }

@@ -51,6 +51,8 @@ from autoedit.db.schema import (
     users,
 )
 from autoedit.intervals import compute_speaking_intervals
+from autoedit.level_normalization import compute_level_normalization as build_level_normalization
+from autoedit.level_normalization import gain_for_channel
 from autoedit.loudness import compute_loudness_envelope
 from autoedit.noise_floor import compute_noise_floor
 from autoedit.diarize import mock_diarize
@@ -275,6 +277,24 @@ def create_app(
 
     def _channel_wav_filename(channel_id: str) -> str:
         return f"ch_{channel_id}.wav"
+
+    def _probe_metadata_path(project_id: str, angle_id: str) -> Path:
+        return project_root(app_data_root, project_id) / "metadata" / "probes" / f"{angle_id}.json"
+
+    def _load_probe_metadata(project_id: str) -> dict[str, dict]:
+        probe_dir = project_root(app_data_root, project_id) / "metadata" / "probes"
+        if not probe_dir.is_dir():
+            return {}
+        result: dict[str, dict] = {}
+        for path in probe_dir.glob("*.json"):
+            angle_id = path.stem
+            if not is_ulid(angle_id):
+                continue
+            try:
+                result[angle_id] = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+        return result
 
     def _norm_label(value: str | None) -> str:
         return "".join(ch for ch in (value or "").lower() if ch.isalnum())
@@ -813,10 +833,18 @@ def create_app(
                 select(audio_channels).where(audio_channels.c.project_id == project_id)
                 .order_by(audio_channels.c.source_angle_id, audio_channels.c.channel_index)
             ).all()
+        probe_metadata = _load_probe_metadata(project_id)
+        angle_payload = []
+        for row in angle_rows:
+            item = dict(row._mapping)
+            if item["id"] in probe_metadata:
+                item["probe"] = probe_metadata[item["id"]]
+            angle_payload.append(item)
         return {
             "project": project,
-            "angles": [dict(row._mapping) for row in angle_rows],
+            "angles": angle_payload,
             "channels": [dict(row._mapping) for row in channel_rows],
+            "probes": probe_metadata,
         }
 
     @app.get("/projects/{project_id}/progress")
@@ -885,7 +913,7 @@ def create_app(
             plog.info(f"Pipeline started for project {project_id[:8]}")
             try:
                 # Stage order: sync → proxy → proxy-low → loudness → noise-floor
-                #   → diarize → intervals → activity → program-audio
+                #   → level-normalization → diarize → intervals → activity → program-audio
                 #   → transcribe → segment-topics → conciseness → summary → cut
 
                 with plog.stage("sync", "Audio sync & channel extraction"):
@@ -902,6 +930,9 @@ def create_app(
 
                 with plog.stage("noise_floor", "10th-percentile floor + 8dB margin"):
                     compute_noise_floors(project_id)
+
+                with plog.stage("level_normalization", "Analysis level normalization"):
+                    compute_level_normalization_stage(project_id)
 
                 with plog.stage("diarize", "Speaker identification"):
                     diarize_speakers(project_id)
@@ -930,7 +961,7 @@ def create_app(
                 with plog.stage("cut", "Deterministic rough cut CDL"):
                     generate_cut(project_id)
 
-                plog.info("Pipeline complete — all 12 stages passed")
+                plog.info("Pipeline complete — all 13 stages passed")
             except Exception as exc:
                 plog.error(f"Pipeline failed: {exc}")
                 set_project_status(app_engine, project_id, "error")
@@ -1730,7 +1761,14 @@ def create_app(
             )
             session.commit()
 
-        return {"angle_id": angle_id, **probe_data}
+        probe_path = _probe_metadata_path(project_id, angle_id)
+        probe_path.parent.mkdir(parents=True, exist_ok=True)
+        probe_payload = {"angle_id": angle_id, **probe_data}
+        tmp_path = probe_path.with_suffix(".json.tmp")
+        tmp_path.write_text(json.dumps(probe_payload, indent=2) + "\n")
+        tmp_path.replace(probe_path)
+
+        return probe_payload
 
     @app.post("/projects/{project_id}/channels", status_code=status.HTTP_201_CREATED)
     def set_channel_mapping(project_id: str, payload: ChannelMappingRequest) -> dict:
@@ -2310,6 +2348,39 @@ def create_app(
         _check_and_update_status(project_id)
         return {"channels": results}
 
+    @app.post("/projects/{project_id}/level-normalization")
+    def compute_level_normalization_stage(project_id: str) -> dict:
+        project = get_project_record(app_engine, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="project not found")
+
+        with Session(app_engine) as session:
+            ch_rows = session.execute(
+                select(audio_channels).where(audio_channels.c.project_id == project_id)
+            ).all()
+
+        if not ch_rows:
+            raise HTTPException(
+                status_code=400,
+                detail="no audio channels found — map channels first",
+            )
+        if any(ch.vad_threshold_db is None for ch in ch_rows):
+            raise HTTPException(
+                status_code=400,
+                detail="vad thresholds missing — run /noise-floor first",
+            )
+
+        result = build_level_normalization(ch_rows)
+        project_dir = project_root(app_data_root, project_id)
+        audio_dir = project_dir / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        tmp_path = audio_dir / "level_normalization.json.tmp"
+        tmp_path.write_text(json.dumps(result, indent=2) + "\n")
+        tmp_path.replace(audio_dir / "level_normalization.json")
+
+        _check_and_update_status(project_id)
+        return result
+
     @app.post("/projects/{project_id}/intervals")
     def compute_intervals(project_id: str) -> dict:
         project = get_project_record(app_engine, project_id)
@@ -2406,6 +2477,16 @@ def create_app(
         if project is None:
             raise HTTPException(status_code=404, detail="project not found")
 
+        project_dir = project_root(app_data_root, project_id)
+        audio_dir = project_dir / "audio"
+        normalization: dict = {}
+        normalization_path = audio_dir / "level_normalization.json"
+        if normalization_path.is_file():
+            try:
+                normalization = json.loads(normalization_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                normalization = {}
+
         # Load speaking intervals from DB
         with Session(app_engine) as session:
             ch_rows = session.execute(
@@ -2431,11 +2512,13 @@ def create_app(
                 if not si_rows:
                     continue
 
+                level_gain_db = gain_for_channel(normalization, ch.id)
                 intervals = [
                     {
                         "start_ms": int(si.start_ms),
                         "end_ms": int(si.end_ms),
                         "mean_db": float(si.mean_db) if si.mean_db is not None else None,
+                        "level_gain_db": level_gain_db,
                     }
                     for si in si_rows
                 ]
@@ -2463,8 +2546,6 @@ def create_app(
         timeline = compute_activity_timeline(channel_intervals, total_duration_ms=max_end)
 
         # Write activity.json
-        project_dir = project_root(app_data_root, project_id)
-        audio_dir = project_dir / "audio"
         result = {
             "timeline": timeline,
             "total_duration_ms": max_end,

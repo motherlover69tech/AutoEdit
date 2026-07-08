@@ -1,7 +1,7 @@
 const ROLES = [
-  { key: 'cam_left', label: 'A · PRES', full: 'Presenter camera', colour: 'var(--presenter)' },
-  { key: 'cam_right', label: 'B · INT', full: 'Interviewee camera', colour: 'var(--interviewee)' },
-  { key: 'wide', label: 'C · WIDE', full: 'Wide camera', colour: 'var(--wide)' },
+  { key: 'cam_left', label: 'A · CAMERA', full: 'Camera A', defaultLabel: 'Camera A', colour: 'var(--presenter)', hint: 'Camera source / close-up. Not a speaker assignment.' },
+  { key: 'cam_right', label: 'B · CAMERA', full: 'Camera B', defaultLabel: 'Camera B', colour: 'var(--interviewee)', hint: 'Camera source / close-up. Not a speaker assignment.' },
+  { key: 'wide', label: 'C · WIDE', full: 'Wide camera', defaultLabel: 'Wide', colour: 'var(--wide)', hint: 'Wide safety angle. Usually not a speaker channel source.' },
 ];
 const CHUNK_SIZE = 8 * 1024 * 1024;
 
@@ -22,6 +22,36 @@ const fmtBytes = (bytes) => {
   while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
   return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 };
+
+function roleMeta(roleKey) {
+  return ROLES.find((role) => role.key === roleKey) || { label: roleKey, full: roleKey, defaultLabel: roleKey, hint: '' };
+}
+
+function probeForAngle(angle) {
+  return angle?.probe || state.probeByAngle.get(angle?.id) || null;
+}
+
+function audioStreamSummary(probe) {
+  const streams = probe?.audio_streams || [];
+  if (!streams.length) return 'Audio streams unknown — probe source to detect channels.';
+  return streams.map((stream) => {
+    const channels = Number(stream.channels || 0);
+    const layout = stream.channel_layout ? ` ${stream.channel_layout}` : '';
+    const rate = stream.sample_rate ? ` @ ${stream.sample_rate} Hz` : '';
+    return `stream ${stream.stream_index}: ${channels} channel${channels === 1 ? '' : 's'}${layout}${rate}`;
+  }).join(' · ');
+}
+
+function probeSummaryHtml(angle) {
+  const probe = probeForAngle(angle);
+  if (!probe) {
+    return '<p class="probe-summary muted" data-probe-summary>Not probed yet. Probe reveals frame rate, duration, and audio channel count.</p>';
+  }
+  const warnings = probe.warnings?.length
+    ? `<br><span class="warn-text">${probe.warnings.map(escapeHtml).join(' · ')}</span>`
+    : '';
+  return `<p class="probe-summary" data-probe-summary><b>Probed</b>: ${escapeHtml(probe.width)}×${escapeHtml(probe.height)} · ${escapeHtml(probe.vcodec)} · ${escapeHtml(probe.src_fps_num)}/${escapeHtml(probe.src_fps_den)} fps<br>${escapeHtml(audioStreamSummary(probe))}${warnings}</p>`;
+}
 
 function setStatus(message, kind = 'ok') {
   const el = qs('statusLine');
@@ -69,7 +99,7 @@ function showRoute() {
   document.querySelectorAll('[data-route]').forEach((el) => el.classList.toggle('is-active', el.dataset.route === route));
   if (route === 'ingest') {
     qs('pageTitle').textContent = 'Create & ingest.';
-    qs('pageLede').textContent = 'New project, three uploads, audio-channel mapping, and sync nudges in one screen.';
+    qs('pageLede').textContent = 'Upload camera sources first, then explicitly choose which source/channel contains each speaker.';
   } else if (route === 'users') {
     qs('pageTitle').textContent = 'Users & authorisation.';
     qs('pageLede').textContent = 'Add reviewer accounts and control who can create users.';
@@ -176,12 +206,14 @@ function renderUploadGrid() {
     zone.innerHTML = `
       <span class="pill"><span class="led" style="background:${role.colour}"></span>${role.label}</span>
       <h3 style="margin-top:14px">${role.full}</h3>
+      <p class="body-copy source-hint">${escapeHtml(role.hint)}</p>
       <p class="mono-note">${angle ? escapeHtml(angle.source_path || angle.label) : 'Drop or choose a source video.'}</p>
-      <div class="field"><label>Label</label><input data-label="${role.key}" value="${role.key === 'cam_left' ? 'Presenter' : role.key === 'cam_right' ? 'Interviewee' : 'Wide'}"></div>
+      <div class="field"><label>Source label</label><input data-label="${role.key}" value="${escapeHtml(angle?.label || role.defaultLabel)}"></div>
       <input type="file" data-file="${role.key}" accept="video/*,.mov,.mp4,.m4v,.mxf">
       <div class="progress"><span data-progress="${role.key}" style="width:${angle ? 100 : 0}%"></span></div>
       <p class="mono-note" data-upload-status="${role.key}">${angle ? 'uploaded' : 'waiting'}</p>
-      ${angle ? `<button type="button" class="btn btn-ghost btn-sm" data-probe="${angle.id}">Probe source</button>` : ''}`;
+      ${angle ? probeSummaryHtml(angle) : ''}
+      ${angle ? `<button type="button" class="btn btn-ghost btn-sm" data-probe="${angle.id}">${probeForAngle(angle) ? 'Re-probe source' : 'Probe source'}</button>` : ''}`;
     grid.appendChild(zone);
   }
   grid.querySelectorAll('[data-file]').forEach((input) => input.addEventListener('change', () => uploadForRole(input.dataset.file, input.files[0])));
@@ -228,13 +260,25 @@ async function uploadForRole(role, file) {
 
 async function probeAngle(angleId) {
   if (!state.activeProject) return;
+  const btn = document.querySelector(`[data-probe="${angleId}"]`);
+  const oldText = btn?.textContent;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Probing…';
+  }
   try {
     const result = await api(`/projects/${state.activeProject.id}/angles/${angleId}/probe`, { method: 'POST' });
     state.probeByAngle.set(angleId, result);
-    setStatus(`${result.angle_id} probed · ${result.width}x${result.height} · ${result.vcodec}`, result.warnings?.length ? '' : 'ok');
+    const angle = state.assets.angles.find((item) => item.id === angleId);
+    setStatus(`${angle?.label || result.angle_id} probed · ${result.width}×${result.height} · ${result.vcodec} · ${audioStreamSummary(result)}`, result.warnings?.length ? '' : 'ok');
     await loadAssets(false);
   } catch (err) {
     setStatus(`Probe failed: ${err.message}. You can still map channel indices manually.`, '');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = oldText || 'Probe source';
+    }
   }
   renderChannelMapping();
 }
@@ -242,6 +286,7 @@ async function probeAngle(angleId) {
 async function loadAssets(rerender = true) {
   if (!state.activeProject) return;
   state.assets = await api(`/projects/${state.activeProject.id}/assets`);
+  state.probeByAngle = new Map(Object.entries(state.assets.probes || {}));
   if (rerender) {
     renderProjectSelect();
     renderUploadGrid();
@@ -256,31 +301,47 @@ function renderChannelMapping() {
   target.replaceChildren();
   const angles = state.assets.angles || [];
   if (!state.activeProject || !angles.length) {
-    target.innerHTML = '<p class="mono-note">Upload and probe at least one angle to map audio channels.</p>';
+    target.innerHTML = '<p class="mono-note">Upload at least one camera source before mapping audio.</p>';
     qs('saveChannelsBtn').disabled = true;
     return;
   }
   const rows = document.createElement('div');
   rows.innerHTML = `
-    <table class="table">
-      <thead><tr><th>Use</th><th>Source</th><th>Channel</th><th>Speaker</th><th>Sync nudge</th><th>Status</th></tr></thead>
+    <div class="mapping-help">
+      <b>Camera source ≠ speaker.</b> If both lavs were recorded into one camera file, select two rows from that same source and label each by the person heard. Probe first to reveal the real audio channel count.
+    </div>
+    <datalist id="speakerLabelOptions">
+      <option value="presenter"></option>
+      <option value="interviewee"></option>
+    </datalist>
+    <table class="table channel-table">
+      <thead><tr><th>Use</th><th>Audio source file</th><th>Audio channel</th><th>Speaker heard on this channel</th><th>Sync nudge</th><th>Probe/status</th></tr></thead>
       <tbody></tbody>
     </table>`;
   const tbody = rows.querySelector('tbody');
   const existing = state.assets.channels || [];
   angles.forEach((angle) => {
-    const probe = state.probeByAngle.get(angle.id) || {};
-    const channelCount = Math.max(2, ...(probe.audio_streams || []).map((s) => s.channels || 0));
+    const probe = probeForAngle(angle);
+    const probedStreams = probe?.audio_streams || [];
+    const channelCount = Math.max(2, ...probedStreams.map((s) => Number(s.channels || 0)));
+    const sourceRole = roleMeta(angle.role);
     for (let ch = 0; ch < channelCount; ch++) {
       const mapped = existing.find((item) => item.source_angle_id === angle.id && item.channel_index === ch);
+      const stream = probedStreams.find((item) => (item.channel_indices || []).includes(ch));
+      const channelLabel = stream
+        ? `ch ${ch} · stream ${stream.stream_index} (${stream.codec || 'audio'})`
+        : `ch ${ch}`;
+      const status = mapped
+        ? '<span class="badge ok">saved</span>'
+        : (probe ? '<span class="badge neutral">not selected</span>' : '<span class="badge warn">probe recommended</span>');
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td><input type="checkbox" data-map-use="${angle.id}:${ch}" ${mapped || (angle.role === 'cam_left' && ch < 2) ? 'checked' : ''}></td>
-        <td><b>${escapeHtml(angle.label)}</b><br><span class="mono-note">${escapeHtml(angle.role)} · ${escapeHtml(angle.id)}</span></td>
-        <td class="mono">${ch}</td>
-        <td><input data-speaker="${angle.id}:${ch}" value="${escapeHtml(mapped?.speaker_label || (ch === 0 ? 'presenter' : 'interviewee'))}"></td>
-        <td><input data-nudge="${angle.id}" type="number" value="${Number(angle.sync_offset_ms || 0)}"></td>
-        <td>${mapped ? '<span class="badge ok">mapped</span>' : '<span class="badge neutral">available</span>'}</td>`;
+        <td><input type="checkbox" data-map-use="${angle.id}:${ch}" ${mapped ? 'checked' : ''}></td>
+        <td><b>${escapeHtml(angle.label)}</b><br><span class="mono-note">${escapeHtml(sourceRole.full)} · ${escapeHtml(angle.id)}</span></td>
+        <td class="mono">${escapeHtml(channelLabel)}</td>
+        <td><input list="speakerLabelOptions" data-speaker="${angle.id}:${ch}" placeholder="presenter or interviewee" value="${escapeHtml(mapped?.speaker_label || '')}"></td>
+        <td><input data-nudge="${angle.id}" type="number" value="${Number(angle.sync_offset_ms || 0)}" aria-label="Sync nudge for ${escapeHtml(angle.label)}"></td>
+        <td>${status}<br><span class="mono-note">${escapeHtml(probe ? audioStreamSummary(probe) : 'No probe data yet')}</span></td>`;
       tbody.appendChild(tr);
     }
   });
@@ -291,12 +352,21 @@ function renderChannelMapping() {
 async function saveChannelMapping() {
   if (!state.activeProject) return;
   const mappings = [];
+  let missingSpeaker = false;
   document.querySelectorAll('[data-map-use]').forEach((box) => {
     if (!box.checked) return;
     const [source_angle_id, chStr] = box.dataset.mapUse.split(':');
     const speaker = document.querySelector(`[data-speaker="${source_angle_id}:${chStr}"]`)?.value.trim();
-    if (speaker) mappings.push({ source_angle_id, channel_index: Number(chStr), speaker_label: speaker });
+    if (!speaker) {
+      missingSpeaker = true;
+      return;
+    }
+    mappings.push({ source_angle_id, channel_index: Number(chStr), speaker_label: speaker });
   });
+  if (missingSpeaker) {
+    setStatus('Every selected audio channel needs a speaker label, e.g. presenter or interviewee.', '');
+    return;
+  }
   const syncByAngle = new Map();
   document.querySelectorAll('[data-nudge]').forEach((input) => syncByAngle.set(input.dataset.nudge, Number(input.value || 0)));
   const sync_nudges = Array.from(syncByAngle, ([source_angle_id, offset_ms]) => ({ source_angle_id, offset_ms }));
