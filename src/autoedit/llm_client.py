@@ -38,6 +38,9 @@ class LLMClient:
         temperature: float = 0.1,
         format_json: bool = True,
         max_tokens: int | None = None,
+        json_schema: dict[str, Any] | None = None,
+        think: bool | None = None,
+        keep_alive: int | str | None = None,
     ) -> dict[str, Any]:
         """
         Call Ollama /api/chat endpoint.
@@ -56,8 +59,14 @@ class LLMClient:
         }
         if max_tokens:
             payload["options"]["num_predict"] = max_tokens
-        if format_json:
+        if json_schema is not None:
+            payload["format"] = json_schema
+        elif format_json:
             payload["format"] = "json"
+        if think is not None:
+            payload["think"] = think
+        if keep_alive is not None:
+            payload["keep_alive"] = keep_alive
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
@@ -67,7 +76,14 @@ class LLMClient:
                 )
                 response.raise_for_status()
                 data = response.json()
-                content = data.get("message", {}).get("content", "")
+                message = data.get("message", {})
+                content = message.get("content", "")
+                if think is False and (
+                    str(message.get("thinking", "")).strip()
+                    or "<think" in content.lower()
+                    or "</think>" in content.lower()
+                ):
+                    raise RuntimeError("LLM returned a thinking trace in non-thinking mode")
                 if format_json:
                     return json.loads(content)
                 return {"text": content}

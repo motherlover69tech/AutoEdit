@@ -9,6 +9,7 @@ import {
   msToPercent,
   needsDriftCorrection,
   parseCubeLUT,
+  shotReasonDisplay,
   playbackVideoTimeForAngle,
   playbackVideoTimeForClip,
   percentToMs,
@@ -27,6 +28,19 @@ assert.equal(findClipAtTime(clips, 999).angle_id, 'a');
 assert.equal(findClipAtTime(clips, 1000).angle_id, 'b');
 assert.equal(findNextClip(clips, 500).angle_id, 'b');
 assert.equal(findNextClip(clips, 1500), null);
+
+assert.deepEqual(
+  shotReasonDisplay({ reason_code: 'speaking', reason_label: 'Speaking', reason_detail: 'Peter' }),
+  { label: 'Speaking', detail: 'Peter', tone: 'speaking' },
+);
+assert.deepEqual(
+  shotReasonDisplay({ reason: 'periodic:wide' }),
+  { label: 'Variety shot', detail: 'Breaks up a long-held shot', tone: 'variety' },
+);
+assert.deepEqual(
+  shotReasonDisplay(null, true),
+  { label: 'Manual override', detail: 'Automatic shot reason paused', tone: 'manual' },
+);
 
 assert.equal(timelineMsFromAudio(1.2344), 1234);
 assert.equal(timelineMsFromAudio(1.2345), 1235);

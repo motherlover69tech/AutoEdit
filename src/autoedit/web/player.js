@@ -10,6 +10,43 @@ export function findNextClip(clips, tMs) {
   return clips.find((clip) => clip.timeline_in_ms > tMs) || null;
 }
 
+const LEGACY_SHOT_REASONS = {
+  "overlap:wide": ["Crosstalk", "Multiple speakers detected", "crosstalk"],
+  "overlap:hold": ["Crosstalk · holding shot", "Wide cut disabled", "crosstalk"],
+  "short_overlap:hold": ["Crosstalk · holding speaker", "Overlap shorter than the wide-shot threshold", "crosstalk"],
+  "interjection:hold": ["Brief interjection · holding speaker", "Avoids a distracting reaction cut", "hold"],
+  "exchange:wide": ["Rapid exchange", "Wide avoids ping-pong cuts", "crosstalk"],
+  "silence:wide": ["Silence", "Wide shot during silence", "silence"],
+  "silence:hold": ["Silence · holding shot", "No active speaker", "silence"],
+  "periodic:wide": ["Variety shot", "Breaks up a long-held shot", "variety"],
+  "unresolved:wide": ["Unresolved speaker", "Wide is safer than a wrong close-up", "uncertain"],
+  "low_confidence:wide": ["Low confidence", "Wide is safer than a wrong close-up", "uncertain"],
+};
+
+export function shotReasonDisplay(clip, manualOverride = false) {
+  if (manualOverride) {
+    return { label: "Manual override", detail: "Automatic shot reason paused", tone: "manual" };
+  }
+  if (!clip) return { label: "No shot reason", detail: "", tone: "neutral" };
+  if (clip.reason_label) {
+    return {
+      label: clip.reason_label,
+      detail: clip.reason_detail || "",
+      tone: clip.reason_code === "speaking" ? "speaking" :
+        clip.reason_code === "variety_wide" ? "variety" :
+        clip.reason_code?.includes("silence") ? "silence" :
+        clip.reason_code?.includes("confidence") || clip.reason_code?.includes("unresolved") ? "uncertain" :
+        clip.reason_code?.includes("crosstalk") || clip.reason_code === "rapid_exchange" ? "crosstalk" : "neutral",
+    };
+  }
+  if (clip.reason?.startsWith("speaker:")) {
+    return { label: "Speaking", detail: clip.reason.slice(8), tone: "speaking" };
+  }
+  const legacy = LEGACY_SHOT_REASONS[clip.reason];
+  if (legacy) return { label: legacy[0], detail: legacy[1], tone: legacy[2] };
+  return { label: "Editorial rule", detail: clip.reason || "Reason unavailable", tone: "neutral" };
+}
+
 export function timelineMsFromAudio(audioCurrentTime) {
   return Math.max(0, Math.round(Number(audioCurrentTime || 0) * 1000));
 }
@@ -571,6 +608,9 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
     qualitySelect: doc.getElementById("qualitySelect"),
     backToAutoButton: doc.getElementById("backToAutoButton"),
     statusText: doc.getElementById("statusText"),
+    shotReason: doc.getElementById("shotReason"),
+    shotReasonLabel: doc.getElementById("shotReasonLabel"),
+    shotReasonDetail: doc.getElementById("shotReasonDetail"),
     // Timeline
     cdlLane: doc.getElementById("cdlLane"),
     topicLane: doc.getElementById("topicLane"),
@@ -902,6 +942,10 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
     const manualAngleId = override.manualAngleId;
     const angleId = override.resolve(autoClip?.angle_id);
     const angle = angleById.get(angleId);
+    const reasonDisplay = shotReasonDisplay(autoClip, Boolean(manualAngleId));
+    if (elements.shotReason) elements.shotReason.dataset.tone = reasonDisplay.tone;
+    if (elements.shotReasonLabel) elements.shotReasonLabel.textContent = reasonDisplay.label;
+    if (elements.shotReasonDetail) elements.shotReasonDetail.textContent = reasonDisplay.detail;
     const manualNudgeMs = syncOffsets[angleId] || 0;
     let desired = manualAngleId
       ? playbackVideoTimeForAngle(angle, tMs, manualNudgeMs)
@@ -993,7 +1037,7 @@ function renderTimeline(elements, timelineState, clips, angleById) {
       start_ms: clip.timeline_in_ms,
       end_ms: clip.timeline_in_ms + clip.dur_ms,
       colour: timelineState.angles?.[clip.angle_id]?.colour || "#808080",
-      label: timelineState.angles?.[clip.angle_id]?.label || clip.angle_id,
+      label: `${timelineState.angles?.[clip.angle_id]?.label || clip.angle_id} · ${shotReasonDisplay(clip).label}`,
     }));
     renderLaneBlocks(elements.cdlLane, cdlSpans, totalMs);
   }

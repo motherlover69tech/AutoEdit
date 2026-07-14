@@ -152,8 +152,96 @@ def test_generate_cdl_silence_hold():
         params={"lead_in_ms": 0, "tail_ms": 0, "silence_behaviour": "hold"},
     )
     clips = cdl["clips"]
-    assert len(clips) == 1
-    assert clips[0]["angle_id"] == "angle_presenter"
+    assert [clip["angle_id"] for clip in clips] == ["angle_presenter", "angle_presenter"]
+    assert [clip["reason_code"] for clip in clips] == ["speaking", "silence_hold"]
+    assert clips[1]["reason_label"] == "Silence · holding shot"
+
+
+def test_generate_cdl_preserves_short_crosstalk_reason_on_held_close_shot():
+    from autoedit.cut_engine import generate_cdl
+
+    timeline = [
+        {"start_ms": 0, "end_ms": 2000, "active": ["presenter"]},
+        {"start_ms": 2000, "end_ms": 2500, "active": ["presenter", "interviewee"]},
+        {"start_ms": 2500, "end_ms": 4000, "active": ["presenter"]},
+    ]
+    cdl = generate_cdl(
+        timeline, _sample_mapping(), _sample_offsets(),
+        wide_angle_id="angle_wide", fps_num=25, fps_den=1,
+    )
+
+    assert [clip["angle_id"] for clip in cdl["clips"]] == [
+        "angle_presenter", "angle_presenter", "angle_presenter",
+    ]
+    assert [clip["reason_code"] for clip in cdl["clips"]] == [
+        "speaking", "short_crosstalk_hold", "speaking",
+    ]
+    assert cdl["clips"][1]["reason_label"] == "Crosstalk · holding speaker"
+
+
+@pytest.mark.parametrize(
+    ("middle", "expected_code"),
+    [
+        ({"active": []}, "silence_hold"),
+        ({"active": ["presenter", "interviewee"]}, "short_crosstalk_hold"),
+    ],
+)
+def test_generate_cdl_preserves_sub_minimum_same_camera_reason_boundary(
+    middle, expected_code
+):
+    from autoedit.cut_engine import generate_cdl
+
+    timeline = [
+        {"start_ms": 0, "end_ms": 2000, "active": ["presenter"]},
+        {"start_ms": 2000, "end_ms": 2100, **middle},
+        {"start_ms": 2100, "end_ms": 4000, "active": ["presenter"]},
+    ]
+    params = {"silence_behaviour": "hold"} if expected_code == "silence_hold" else None
+
+    cdl = generate_cdl(
+        timeline, _sample_mapping(), _sample_offsets(),
+        wide_angle_id="angle_wide", fps_num=25, fps_den=1, params=params,
+    )
+
+    assert [clip["angle_id"] for clip in cdl["clips"]] == [
+        "angle_presenter", "angle_presenter", "angle_presenter",
+    ]
+    assert 0 < cdl["clips"][1]["dur_ms"] < 250
+    assert cdl["clips"][1]["timeline_in_ms"] == 2000
+    assert cdl["clips"][1]["reason_code"] == expected_code
+
+
+def test_generate_cdl_still_absorbs_sub_minimum_visual_camera_flash():
+    from autoedit.cut_engine import generate_cdl
+
+    timeline = [
+        {"start_ms": 0, "end_ms": 2000, "active": ["presenter"]},
+        {"start_ms": 2000, "end_ms": 2100, "active": ["interviewee"]},
+        {"start_ms": 2100, "end_ms": 4000, "active": ["presenter"]},
+    ]
+    cdl = generate_cdl(
+        timeline, _sample_mapping(), _sample_offsets(),
+        wide_angle_id="angle_wide", fps_num=25, fps_den=1,
+    )
+
+    assert {clip["angle_id"] for clip in cdl["clips"]} == {"angle_presenter"}
+    assert sum(clip["dur_ms"] for clip in cdl["clips"]) == 4000
+    assert cdl["clips"][1]["reason_code"] == "brief_interjection_hold"
+
+
+def test_generate_cdl_periodic_wide_is_labelled_variety_shot():
+    from autoedit.cut_engine import generate_cdl
+
+    cdl = generate_cdl(
+        [{"start_ms": 0, "end_ms": 12000, "active": ["presenter"]}],
+        _sample_mapping(), _sample_offsets(), wide_angle_id="angle_wide",
+        fps_num=25, fps_den=1,
+        params={"wide_interval_ms": 5000, "wide_interval_jitter": 0},
+    )
+
+    variety = [clip for clip in cdl["clips"] if clip["reason_code"] == "variety_wide"]
+    assert variety
+    assert all(clip["reason_label"] == "Variety shot" for clip in variety)
 
 
 def test_generate_cdl_silence_wide():
@@ -335,14 +423,25 @@ def test_cut_generates_cdl_and_saves(project_with_activity):
     assert result["project_id"] == pid
     assert "clips" in result
     assert len(result["clips"]) >= 1
+    assert all(
+        {"reason", "reason_code", "reason_label", "reason_detail"} <= clip.keys()
+        for clip in result["clips"]
+    )
     cdl_path = data_root / pid / "edit" / "cdl.json"
     assert cdl_path.is_file()
     on_disk = json.loads(cdl_path.read_text())
     assert on_disk["project_id"] == pid
+    assert on_disk["clips"] == result["clips"]
     with Session(engine) as session:
         cut_rows = session.execute(select(cuts).where(cuts.c.project_id == pid)).all()
     assert len(cut_rows) == 1
     assert cut_rows[0].kind == "rough"
+    assert cut_rows[0].cdl_json["clips"] == result["clips"]
+
+    (data_root / pid / "audio" / "program.m4a").write_bytes(b"program")
+    player_state = client.get(f"/projects/{pid}/player-state")
+    assert player_state.status_code == 200
+    assert player_state.json()["cut"]["clips"] == result["clips"]
 
 
 def test_cut_rebases_offsets_to_audio_source_and_maps_speakers_to_camera_roles(auth_client):
@@ -450,7 +549,10 @@ def test_cut_repairs_mid_timeline_source_overrun(auth_client):
     assert clips[0]["angle_id"] == wide_id
     assert clips[0]["src_in_ms"] >= 0
     assert clips[0]["src_in_ms"] + clips[0]["dur_ms"] <= 5000
-    assert any(clip["angle_id"] == base_id for clip in clips[1:])
+    fallbacks = [clip for clip in clips[1:] if clip["angle_id"] == base_id]
+    assert fallbacks
+    assert all(clip["reason_code"] == "source_fallback" for clip in fallbacks)
+    assert all(clip["reason_label"] == "Source fallback" for clip in fallbacks)
     assert all(clip["src_in_ms"] >= 0 for clip in clips)
 
 

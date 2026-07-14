@@ -23,19 +23,45 @@ Read those before implementing.
 
 1. Run from `/workspace/AUTOEDIT`.
 2. Do **not** ask Peter to restate context; this file + `jobs/BACKLOG.md` + `docs/plans/TESTING_STRATEGY.md` are the handoff.
-3. **Player is live-verified:** playback, timeline, LUT upload/activate/toggle (real Blackmagic .cube tested), angle switching, and notes UI all render in the browser behind NPM. Remaining manual gates are XSS-safe note rendering and multi-author verification.
-4. Stages/features that are mock/template/in-process must not be documented as production-complete.
+3. **Immediate engineering pickup:** continue Phase 4 speaker mapping/diarization from `docs/plans/ai-gpu-1-corrective-pickup.md` and the authoritative roadmap. The artifact corrective review is now `PASS`.
+4. Preserve `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock`; queued ASR/alignment/diarization ran successfully, but frame-level timing, confirmed speaker identity, and speaker-aware cut acceptance remain open.
+5. The unrelated player manual gates remain XSS-safe note rendering and multi-author verification.
+6. For the broader real-AI phase order, also read `docs/plans/whisperx-speaker-aware-ai-roadmap.md`.
+
+## AI-GPU-1 corrective checkpoint (updated 2026-07-11)
+
+Substantial local speaker-aware AI work now exists. The corrective review passed, but the stage remains **in progress**, not production-ready:
+
+- Strict/versioned AI contracts, atomic last-known-good artifacts, synchronized analysis-audio generation, and an isolated single-concurrency WhisperX job queue were added locally.
+- Real-media technical baseline: `docs/ai/real-media-phase0-baseline.json`; private media/analysis stays ignored under `testmedia/`.
+- Consent-cleared local analysis audio is 16 kHz mono; exact source/derivative measurements and fingerprints remain in the untracked local manifest.
+- Authoritative sync convention: `source_ms = master_ms + sync_offset_ms`; convert results using `master_ms = source_ms - sync_offset_ms` and clip negative pre-roll.
+- Current reconciliation checkpoint: full mock-backed suite `685 passed, 2 skipped`; delayed-review worker/artifact/transcript hardening suite `142 passed`; Ruff on changed Python files, compile, lock/dependency, privacy, and `git diff --check` gates passed. The skipped local JS module test previously passed separately in Node on Unraid.
+- Remote V100 `/ready` passed for `large-v3` FP16: compute capability 7.0, about 50 seconds cold load, maximum observed readiness VRAM 22,186 MiB.
+- A consent-cleared queued ASR/alignment run completed in 20.93 seconds with 241 ordered/non-empty segments, approximately 1,422 words, and no structural timing defects. A wrong-hash request returned HTTP 400. Observed post-job GPU memory was 6,048 MiB, not a sampled peak.
+- Independent artifact review now returns `PASS`; symlink confinement, strict integer timestamps, immutable failure records, and resolved-speaker integrity have direct regressions.
+- Worker logs expose a TorchCodec/PyTorch/FFmpeg file-decoder warning, but the in-memory waveform path passed real pyannote diarization and does not use that decoder.
+- Real constrained two-speaker diarization completed in 28.99 seconds: 241 aligned segments, 1,422 words, 322 turns, two anonymous speakers, and 8,024 MiB sampled peak VRAM. The reviewed worker image tag is `autoedit-whisperx:phase1-overlap-sweep`; its digest remains in the local manifest.
+- Phase 4 deterministic speaker resolution now exists locally: multi-turn high-confidence voice evidence may suggest an identity, prior confirmations require current voice revalidation (so anonymous label swaps are safe), transcript/LLM context is audit-only, and conflicts remain unresolved/wide.
+- Independent Phase 4 resolver and WhisperX diarization-import re-review returned `PASS`; all four requested direct regressions are present and no mandatory resolver/import regressions remain missing.
+- The strict LLM context seam ran through AUTOEDIT against the consent-controlled transcript with local Qwen 3.6 27B. It extracted three anonymous explicit-address candidates at the 0.40 audit ceiling, made no voice-cluster assignments, used non-thinking structured output, and unloaded immediately afterward.
+- Independent review then required fail-closed transcript grounding and stricter malformed-output handling. The seam now validates every quote and timestamp against the same source segment, rejects thinking traces and coercive/malformed input/output, and passed the consent-controlled Qwen rerun after hardening. Names, excerpts, exact evidence timestamps, job IDs, and media fingerprints are intentionally not committed.
+- The temporary Unraid container `autoedit-whisperx-phase0` was stopped after the gate. Production `/mnt/user/appdata/autoedit` was not rebuilt or changed.
+
+**Canonical pickup instructions, exact gates, paths, and safe rerun order:** `docs/plans/ai-gpu-1-corrective-pickup.md`.
 
 ## Current implementation state
 
 - Backend stack: Python 3.12 + FastAPI + SQLAlchemy Core + pytest, managed with `uv`.
-- Latest local verification: `env -u VIRTUAL_ENV uv run pytest -q` → **489 passed, 2 skipped**.
-- Compile check: `python -m compileall -q src tests` passes.
+- Final local reconciliation checkpoint: `667 passed, 2 skipped`.
+- Compilation, lock/dependency validation, and `git diff --check` are part of the final commit gate.
 - Deployed on Unraid: `/mnt/user/appdata/autoedit`, `network_mode: host`, port 8010 behind NPM at `ingest.peteflix.uk`.
 - Central MySQL at `192.168.50.50:3306`, database `autoedit`, user `autoedit`. Password in deployment secrets only.
 - VAAPI hardware proxy encoding active (`PROXY_ENCODER=h264_vaapi`, `/dev/dri` mounted).
 - Quality default is now `proxy` (720p), not `proxy_low`. All three places updated: API, HTML, JS.
 - Auto-cut editorial default is now **Direct** and live-deployed: `min_shot_ms=250`, `lead_in_ms=0`, `tail_ms=0`, `silence_behaviour='wide'`, `overlap_to_wide=true`. Existing projects keep stored `cuts.params_json` until regenerated; live project `sm test` was regenerated as `Direct rough cut`. Loosen only deliberately via higher min-shot/tail/lead or relief wides.
+- Shot-reason audit metadata is implemented and live-deployed: each newly generated CDL reason segment carries `reason_code`, `reason_label`, and `reason_detail`, and the player shows the active reason during playback. Same-camera reason boundaries are retained without causing a visual camera switch, including segments below the 250 ms visual anti-jitter threshold. Existing CDLs fall back to their legacy `reason` strings and therefore do not require regeneration merely to show a basic reason. Regenerate only when the richer same-camera reason boundaries are wanted.
+- Final independent shot-reason re-review returned `PASS`: sub-minimum same-camera boundaries, visual anti-jitter, frame snapping, source-fallback reconstruction, and API/disk/database/player-state persistence were all accepted with no further findings.
 - New processing stage: `level_normalization` runs after `noise_floor`, writes `audio/level_normalization.json`, and applies analysis-only gain offsets to activity `levels` so cut dominance compares normalized channel levels instead of raw uneven mic dBFS. It does not change source WAVs or `program.m4a`.
 - Ingest/channel mapping UI clarification: Camera A/B/Wide are now neutral source labels, probe results are persisted in `metadata/probes/*.json` and exposed via `/assets`, and the audio mapping table starts blank unless mappings are already saved. Operators must explicitly pick source channel + speaker heard.
 
@@ -81,6 +107,7 @@ The player had pervasive scope bugs where `doc` (a function parameter) was used 
 - **Docker Compose auto-loads `.env`**: The file at `/mnt/user/appdata/autoedit/.env` had stale `DB_HOST=autoedit-mysql` and placeholder passwords. When shell env vars aren't present, `.env` takes over and breaks deployments. Always verify with `docker compose config` before deploying.
 - **`cat > file` over SSH produces 0-byte files**: Piping content through SSH to `cat` is unreliable. Always use `scp` for file transfers.
 - **Static web files hot-inject**: JS/HTML/CSS can be copied into running container without rebuild: `docker cp src/autoedit/web/player.js autoedit-app-1:/app/src/autoedit/web/player.js`. Python changes still need rebuild.
+- **Narrow deploys from a dirty feature workspace must account for dependency drift**: the workspace `api.py` can import other uncommitted AI modules that production does not yet have. For the shot-reason deploy, copying workspace `api.py` alone caused a restart loop (`transcribe_with_backend` missing). Production was immediately rebuilt from its backed-up API with only `_with_shot_reason` imported/applied, while the reviewed cut engine/player files were deployed unchanged. Always run an in-container API import before accepting a narrow deploy.
 
 ### Feature-status caveats
 

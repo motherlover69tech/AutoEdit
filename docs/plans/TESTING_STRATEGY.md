@@ -1,12 +1,26 @@
 # AUTOEDIT Testing Strategy
 
+## Current verification checkpoint — 2026-07-14 reconciliation
+
+- Full mock-backed suite: `685 passed, 2 skipped`.
+- Focused cut/player suite: `60 passed, 1 skipped`.
+- Python compile and `git diff --check`: passed.
+- The local pytest wrapper skipped its JS module test because Node is not installed in the workspace. The same `tests/player_logic.test.mjs` was then executed in `node:22-alpine` on Unraid and passed: `All player logic + timeline + LUT + angle-LUT tests passed`.
+- New CDL reason metadata preserves visual timing while exposing same-camera editorial boundaries: speaking, crosstalk/hold, interjection hold, rapid exchange, silence, variety wide, source fallback, and future unresolved/low-confidence states.
+- Live HTTPS verification passed: login `204`, projects `200`, player `200`, player-state `200`, and the player HTML contained `shotReason`. The existing project had 56 legacy-reason clips and zero structured clips; all are supported by the player fallback. Production remained `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock`.
+- Review-fix deployment verification: 100 ms silence and short-crosstalk inputs both survived canonical 25 fps snapping as distinct 80 ms reason segments in the live container. Local and deployed `cut_engine.py` hashes matched. Production image `sha256:48e1a370d1c171d96baf25ac2de47e5438bb097aa97a76889ebfb9703b1b606e` stayed running with zero restarts.
+- Final independent re-review: `PASS`, with no remaining shot-reason correctness or persistence findings.
+
 This plan expands Appendix D of the source spec. Every implementation stage must add or update tests here as the project structure becomes concrete.
 
 ## Current verification checkpoint
 
-- Local/default command: `env -u VIRTUAL_ENV uv run pytest -q` → latest observed result `489 passed, 2 skipped`.
-- Targeted sync command: `env -u VIRTUAL_ENV uv run pytest tests/test_audio_sync.py -q` → latest observed result `18 passed`.
-- Compile sanity command: `env -u VIRTUAL_ENV uv run python -m compileall -q src tests` → passes.
+- Active AI job: unresolved Phase 4/acceptance work in `docs/plans/ai-gpu-1-corrective-pickup.md`.
+- Final local reconciliation checkpoint: `685 passed, 2 skipped`; delayed-review worker/artifact/transcript hardening checkpoint: `142 passed`.
+- Artifact confinement/strictness/immutability and speaker-mapping corrections received independent `PASS` reviews and have direct regressions.
+- Remote V100 `/ready`, queued real ASR/alignment, and constrained two-speaker diarization succeeded. These prove transport/structure, not frame-level timing, stable speaker identity, editorial cut quality, or production acceptance.
+- Compilation and `git diff --check` remain mandatory after every reconciliation/code change.
+- Production remains `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock`.
 - MySQL integration skips unless DB env vars are supplied.
 - Current remediation job: `CONFIG-REVIEW` / `docs/plans/central-mysql-deployment-and-docs-remediation.md`; implementation and live deployment verification are complete.
 - Stage 7.0 deployment is behind Nginx Proxy Manager, not Caddy; docs/config now reflect that.
@@ -87,6 +101,30 @@ Manual checks required before Stage 7.1 can be marked `done`:
 - Forced angle remains within 1 frame of program audio on a clapper/sync test.
 - Seeking picks the correct CDL angle/time.
 - Throttled/poor-network test degrades gracefully via `proxy_low` or buffer-aware hold behavior.
+
+## WhisperX speaker-aware AI benchmark
+
+The real-AI roadmap requires a privacy-safe real-media benchmark before WhisperX
+can replace VAD/mic-level activity as camera-decision authority. The scaffold lives
+at `tests/fixtures/golden_interview/`; expected JSON files remain explicitly
+`not_labeled` until consent-cleared external fixtures and ground truth exist.
+
+- Protocol: `docs/ai/whisperx-evaluation-protocol.md`.
+- External media is selected only with `AUTOEDIT_GOLDEN_MEDIA_ROOT`.
+- Ordinary tests must remain self-contained and must not download media.
+- Required metrics include speaker-turn F1/DER, overlap misses, aligned word error,
+  WER where possible, wrong-close-up/cut agreement, and bleed/noise false cuts.
+- Acceptance thresholds are set from the observed VAD baseline, not invented in
+  advance. Failed acceptance keeps VAD/mock production behavior unchanged.
+- Audio sync remains automatic; benchmark failures must never create a manual
+  timeline-nudge workflow.
+
+Planned trusted-host command (the integration test is not implemented yet):
+
+```bash
+AUTOEDIT_GOLDEN_MEDIA_ROOT=/secure/autoedit-fixtures \
+  env -u VIRTUAL_ENV uv run pytest tests/integration/test_whisperx_golden_media.py -q
+```
 
 ## Test categories
 

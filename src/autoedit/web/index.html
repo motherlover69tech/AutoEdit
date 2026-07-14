@@ -58,6 +58,11 @@
         <video id="videoA" class="program-video is-visible" muted playsinline preload="auto"></video>
         <video id="videoB" class="program-video" muted playsinline preload="auto"></video>
         <canvas id="lutCanvas" class="lut-canvas" aria-label="LUT-graded output"></canvas>
+        <div id="shotReason" class="shot-reason" data-tone="neutral" aria-live="polite">
+          <span class="shot-reason-kicker">Shot reason</span>
+          <strong id="shotReasonLabel">Loading…</strong>
+          <span id="shotReasonDetail"></span>
+        </div>
         <div id="statusText" class="status-text" role="status">Loading player…</div>
       </section>
 
@@ -223,6 +228,6 @@
       </div><!-- end playerShell -->
     </main>
 
-    <script type="module" src="/web/player.js?v=6"></script>
+    <script type="module" src="/web/player.js?v=7"></script>
   </body>
 </html>

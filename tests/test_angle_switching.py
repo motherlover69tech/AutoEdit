@@ -29,6 +29,17 @@ def _angles(cdl):
     return [c["angle_id"] for c in cdl["clips"]]
 
 
+def _visual_shots(cdl):
+    """Collapse adjacent reason segments that do not change the camera."""
+    shots = []
+    for clip in cdl["clips"]:
+        if shots and shots[-1][0] == clip["angle_id"]:
+            shots[-1] = (shots[-1][0], shots[-1][1] + clip["dur_ms"])
+        else:
+            shots.append((clip["angle_id"], clip["dur_ms"]))
+    return shots
+
+
 # ── Dominance: cross-mic bleed must not read as overlap ───────────────
 
 def test_bleed_resolves_to_dominant_speaker():
@@ -41,7 +52,8 @@ def test_bleed_resolves_to_dominant_speaker():
     }]
     cdl = _cdl(timeline)
     assert _angles(cdl) == ["cam_p"]
-    assert cdl["clips"][0]["reason"] == "speaker:presenter"
+    assert cdl["clips"][0]["reason"] == "dominance:presenter"
+    assert cdl["clips"][0]["reason_code"] == "speaking"
 
 
 def test_bleed_heavy_conversation_is_not_all_wide():
@@ -92,9 +104,11 @@ def test_brief_overlap_does_not_flash_wide():
         {"start_ms": 5400, "end_ms": 10000, "active": ["interviewee"]},
     ]
     cdl = _cdl(timeline)
-    assert _angles(cdl) == ["cam_p", "cam_i"]
+    assert _visual_shots(cdl) == [("cam_p", 5400), ("cam_i", 4600)]
     # Presenter holds the frame through the handover overlap.
-    assert cdl["clips"][0]["dur_ms"] == 5400
+    assert [clip["reason_code"] for clip in cdl["clips"][:2]] == [
+        "speaking", "short_crosstalk_hold",
+    ]
 
 
 def test_sustained_overlap_still_goes_wide():
@@ -119,7 +133,10 @@ def test_backchannel_does_not_steal_the_shot():
         {"start_ms": 6800, "end_ms": 12000, "active": ["presenter"]},
     ]
     cdl = _cdl(timeline)
-    assert _shots(cdl) == [("cam_p", 12000)]
+    assert _visual_shots(cdl) == [("cam_p", 12000)]
+    assert [clip["reason_code"] for clip in cdl["clips"]] == [
+        "speaking", "brief_interjection_hold", "speaking",
+    ]
 
 
 def test_substantial_reply_does_cut():

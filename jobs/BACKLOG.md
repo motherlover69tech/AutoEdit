@@ -6,13 +6,39 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ## Current next job
 
-**Current next job: Stage 7.4 XSS-safe notes verification.** Notes UI renders; remaining manual gates are XSS-safe note body rendering (verify injected `<script>` does not execute) and multi-author display-name verification.
+**Current engineering pickup: AI-GPU-1 application acceptance.** Artifact corrections, deterministic Phase 4 speaker resolution, queued ASR/alignment, and an isolated constrained-diarization smoke have passed. Next, verify selected WhisperX word timestamps against consent-cleared source/player media within one project frame, then complete operator-confirmed speaker identity, speaker-turn cut acceptance, and valid peak-VRAM/coexistence measurements. Keep production on mock backends.
 
-Latest local full-suite checkpoint: **438 passed, 2 skipped**.
+The separate UI manual gate remains Stage 7.4 XSS-safe notes and multi-author verification; it may proceed independently but does not supersede the active AI corrective job.
+
+Final local reconciliation checkpoint: `685 passed, 2 skipped`. V100 `/ready`, queued real ASR/alignment and constrained diarization, and the audit-only Qwen context pass succeeded; frame-level timing, confirmed speaker identity, speaker-turn cut acceptance, coexistence measurements, and the consent-cleared benchmark remain open.
 
 Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`, no lead/tail, overlap/silence→wide). Existing cuts retain stored params until regenerated; live project `sm test` was regenerated as `Direct rough cut`.
 
 ## Detailed jobs
+
+### Job AI-GPU-1-CORRECTIVE — artifact review fixes and real inference acceptance
+
+- **Status:** in_progress / corrective review passed
+- **Depends on:** AI-GPU-1 adapter, versioned artifact slice, synchronized analysis-audio slice, queued worker slice
+- **Goal:** correct the independent artifact-review findings, obtain a clean review, and complete valid V100 ASR/alignment and diarization acceptance without changing production mock defaults prematurely.
+- **Build/fix:** symlink-safe artifact output confinement; strict integer timestamp validation; immutable failure-attempt records; resolved-speaker mapping/reference integrity; host-compatible queued-job harness; TorchCodec/audio-decode remediation for diarization.
+- **Latest automated results:** delayed-review worker/artifact/transcript hardening suite `142 passed`; full mock-backed suite `685 passed, 2 skipped`.
+- **Live evidence:** V100 `/ready` passed for CUDA capability 7.0 and `large-v3` FP16. A consent-cleared hash-bound queued run completed in 20.93 seconds with 241 aligned segments and about 1,422 words; wrong-hash rejection returned HTTP 400. Post-job VRAM snapshot: 6,048 MiB. Runtime identifiers and media fingerprints remain outside Git.
+- **Review gate:** independent artifact status is `PASS`.
+- **Manual/live gates:** valid queued ASR/alignment; selected word timing within one project frame; real diarization/audio decode; overlap/uncertainty behavior; valid peak-VRAM and Ollama/Dots coexistence measurements.
+- **Production gate:** retain `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock` until every acceptance gate passes explicitly.
+- **Planning doc:** `docs/plans/ai-gpu-1-corrective-pickup.md`
+
+### Job AI-GPU-1-PHASE4 — speaker identity evidence and mapping
+
+- **Status:** in_progress / resolver, import review, and isolated real-diarization smoke passed; production acceptance remains blocked
+- **Goal:** resolve anonymous diarizer labels into stable project speaker IDs without allowing transcript/LLM guesses or cross-run label ordering to become identity truth.
+- **Implemented:** strict current-turn evidence references; multi-turn/high-confidence voice threshold; current operator confirmation; current voice revalidation before prior-confirmed reuse; deterministic label-swap handling; audit-only transcript context; fail-closed conflicts; provenance-preserving resolved turns.
+- **Review gate:** independent Phase 4 resolver and WhisperX 3.8.x diarization-import re-review returned `PASS`; no mandatory regressions remain missing.
+- **Latest automated results:** `tests/test_speaker_mapping.py` → `15 passed`; `tests/test_speaker_context.py` → `37 passed`; delayed-review worker/artifact/transcript hardening suite → `142 passed`; full mock-backed suite → `685 passed, 2 skipped`.
+- **Live LLM evidence:** AUTOEDIT's strict context module called local Qwen 3.6 27B over the consent-controlled transcript and returned three anonymous explicit-address candidates at confidence 0.40. It assigned no diarizer IDs and unloaded immediately. Names, excerpts, exact timestamps, and runtime identifiers remain outside Git.
+- **LLM fail-closed correction:** independent review found that initial schema validation did not prove quotes/timestamps came from the transcript. The seam now requires quote and timestamp grounding to the same source segment and rejects thinking traces, malformed/coercive transcript input, partial model responses, non-finite confidence, and assignment fields. The hardened real Qwen rerun passed.
+- **Production blocker:** the deployment does not carry the private Hugging Face authorization/cached gated models or a completed Compose-managed acceptance record. Production remains mock-backed.
 
 ### Job CONFIG-REVIEW — Central MySQL deployment + docs remediation
 
@@ -257,14 +283,15 @@ Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`,
 
 ### Job 5.1 — Transcription
 
-- **Status:** done
+- **Status:** in_progress — deterministic baseline complete; AI-GPU-1 WhisperX service boundary implemented locally, live V100 gates pending.
 - **Depends on:** 3.4
 - **Spec stage:** 5.1
 - **Goal:** per-speaker transcript segments with word-level timestamps on the master timeline.
-- **Build:** `POST /projects/{id}/transcribe` reads channel WAVs, runs `mock_transcribe()` per channel, applies sync offsets, writes `transcript/transcript.json` and `transcript_segments` rows. Idempotent: deletes old rows before re-insert.
-- **Required tests:** mock returns segments; offset applied to word times; word confidence; empty audio; auth/404/400; idempotent; word count correct.
-- **Latest local result:** `env -u VIRTUAL_ENV uv run pytest -q` → `195 passed, 1 skipped`.
-- **Production swap:** replace `mock_transcribe()` with faster-whisper via `WHISPER_BACKEND`.
+- **Build:** `POST /projects/{id}/transcribe` selects explicit `mock` or `whisperx` backends. The WhisperX path calls a separate internal GPU service, normalizes segment/word seconds to integer master-timeline milliseconds, applies the channel sync offset exactly once, and fails visibly without fake fallback text. `services/whisperx_service/` and `docker-compose.gpu-ai.yml` provide an opt-in CUDA service with forced alignment and read-only path-confined media access.
+- **Required tests:** mock contract and idempotency; WhisperX request/options; millisecond normalization; offset applied exactly once; unaligned words retain text without fabricated timestamps; explicit service errors; shared-path confinement.
+- **Latest targeted result:** `env -u VIRTUAL_ENV uv run pytest tests/test_whisperx.py tests/test_transcribe.py -q` → `19 passed`.
+- **Planning doc:** `docs/plans/gpu-ai-whisperx-llm-integration.md`.
+- **Manual gates:** build image on Unraid; verify V100 in container; real-WAV aligned word timing within one frame; measure VRAM alongside Dots TTS with Ollama unloaded; only then enable `WHISPER_BACKEND=whisperx`.
 
 ### Job 5.2 — Topic segmentation
 
@@ -389,7 +416,7 @@ Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`,
 | 4.6 | Program audio mixdown | done | 3.4 | browser-playable `audio/program.m4a` with timing offsets |
 | 6.1 | Core cut algorithm | done | 4.4, CDL contract | deterministic rough-cut CDL; writes `edit/cdl.json` + `cuts` table |
 | 6.2 | Anti-jitter & periodic wide | done | 6.1 | incoming-speaker pref anti-jitter + periodic wide injection |
-| 5.1 | Transcription | done | 3.4 | per-speaker transcript segments + `transcript.json` |
+| 5.1 | Transcription | in_progress | 3.4 | mock baseline complete; opt-in WhisperX adapter/service implemented, live V100 gates pending |
 | 5.2 | Topic segmentation | done | 5.1 | non-overlapping topic spans + `topics.json` |
 | 5.3 | Conciseness grading | done | 5.2 | deterministic scores + rationale per span |
 | 5.5 | Report output | done | 5.3, 4.4 | `transcript/summary.json` with speaker times + overlap/silence |

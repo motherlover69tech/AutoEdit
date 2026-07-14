@@ -39,6 +39,45 @@ DEFAULT_CUT_PARAMS: dict[str, Any] = {
 }
 
 
+def _shot_reason_fields(reason: str) -> dict[str, str]:
+    """Return stable, user-facing audit metadata for a cut-engine reason."""
+    if reason.startswith("speaker:"):
+        speaker = reason.partition(":")[2]
+        return {"reason_code": "speaking", "reason_label": "Speaking", "reason_detail": speaker}
+    if reason.startswith("dominance:"):
+        speaker = reason.partition(":")[2]
+        return {
+            "reason_code": "speaking",
+            "reason_label": "Speaking",
+            "reason_detail": f"{speaker} · cross-mic bleed rejected",
+        }
+    reasons = {
+        "overlap:wide": ("crosstalk", "Crosstalk", "Multiple speakers detected"),
+        "overlap:hold": ("crosstalk_hold", "Crosstalk · holding shot", "Wide cut disabled"),
+        "short_overlap:hold": ("short_crosstalk_hold", "Crosstalk · holding speaker", "Overlap shorter than the wide-shot threshold"),
+        "interjection:hold": ("brief_interjection_hold", "Brief interjection · holding speaker", "Avoids a distracting reaction cut"),
+        "exchange:wide": ("rapid_exchange", "Rapid exchange", "Wide avoids ping-pong cuts"),
+        "silence:wide": ("silence_wide", "Silence", "Wide shot during silence"),
+        "silence:hold": ("silence_hold", "Silence · holding shot", "No active speaker"),
+        "periodic:wide": ("variety_wide", "Variety shot", "Breaks up a long-held shot"),
+        "unresolved:wide": ("unresolved_speaker", "Unresolved speaker", "Wide is safer than a wrong close-up"),
+        "low_confidence:wide": ("low_confidence", "Low confidence", "Wide is safer than a wrong close-up"),
+    }
+    if reason.startswith("source_unavailable:"):
+        original_angle = reason.split(":", 2)[1]
+        return {
+            "reason_code": "source_fallback",
+            "reason_label": "Source fallback",
+            "reason_detail": f"Requested camera {original_angle} has no available frame",
+        }
+    code, label, detail = reasons.get(reason, ("editorial_rule", "Editorial rule", reason))
+    return {"reason_code": code, "reason_label": label, "reason_detail": detail}
+
+
+def _with_shot_reason(clip: dict[str, Any], reason: str) -> dict[str, Any]:
+    return {**clip, "reason": reason, **_shot_reason_fields(reason)}
+
+
 def _resolve_activity_segments(
     activity_timeline: list[dict[str, Any]],
     effective: dict[str, Any],
@@ -91,6 +130,8 @@ def _resolve_activity_segments(
         }
         if kind == "overlap":
             intent["active"] = list(active)
+        elif kind == "solo" and len(active) > 1:
+            intent["reason"] = f"dominance:{speaker}"
         intents.append(intent)
     intents = _merge_intents(intents)
 
@@ -115,6 +156,7 @@ def _resolve_activity_segments(
                         break
             if holder is not None:
                 it["kind"], it["speaker"] = "solo", holder
+                it["reason"] = "short_overlap:hold"
         intents = _merge_intents(intents)
 
     # ── Pass 3: suppress sandwiched interjections ─────────────────────
@@ -135,6 +177,7 @@ def _resolve_activity_segments(
                     and prev["speaker"] != cur["speaker"]
                 ):
                     cur["speaker"] = prev["speaker"]
+                    cur["reason"] = "interjection:hold"
                     changed = True
             if changed:
                 intents = _merge_intents(intents)
@@ -187,6 +230,7 @@ def _merge_intents(intents: list[dict[str, Any]]) -> list[dict[str, Any]]:
             merged
             and merged[-1]["kind"] == it["kind"]
             and merged[-1]["speaker"] == it["speaker"]
+            and merged[-1].get("reason") == it.get("reason")
         ):
             merged[-1]["end_ms"] = it["end_ms"]
             if it.get("reason") and not merged[-1].get("reason"):
@@ -223,10 +267,14 @@ def _snap_dur(ms: int, frame_dur_num: int, frame_dur_den: int) -> int:
 
 
 def _merge_same_angle(clips: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Merge adjacent clips with the same angle_id."""
+    """Merge adjacent clips only when angle and audit reason are identical."""
     merged: list[dict[str, Any]] = []
     for clip in clips:
-        if merged and merged[-1]["angle_id"] == clip["angle_id"]:
+        if (
+            merged
+            and merged[-1]["angle_id"] == clip["angle_id"]
+            and merged[-1].get("reason") == clip.get("reason")
+        ):
             prev = merged[-1]
             clip_end = clip["timeline_in_ms"] + clip["dur_ms"]
             prev["dur_ms"] = clip_end - prev["timeline_in_ms"]
@@ -272,22 +320,19 @@ def _enforce_min_shot_ms(clips: list[dict[str, Any]], min_shot_ms: int) -> list[
     i = 0
     while i < len(clips):
         clip = dict(clips[i])
+        same_prev = bool(result and result[-1]["angle_id"] == clip["angle_id"])
+        same_next = bool(i + 1 < len(clips) and clips[i + 1]["angle_id"] == clip["angle_id"])
+
         if clip["dur_ms"] >= min_shot_ms:
             result.append(clip)
             i += 1
             continue
 
-        same_prev = result and result[-1]["angle_id"] == clip["angle_id"]
-        same_next = (i + 1 < len(clips) and clips[i + 1]["angle_id"] == clip["angle_id"])
-
-        if same_prev:
-            # Merge into preceding (same angle)
-            prev = result[-1]
-            prev["dur_ms"] = clip["timeline_in_ms"] + clip["dur_ms"] - prev["timeline_in_ms"]
-            i += 1
-        elif same_next:
-            # Merge into following (same angle)
-            _merge_into_next(clips, i)
+        if same_prev or same_next:
+            # Minimum-shot enforcement is about visual camera changes. Keep a
+            # short metadata-only reason boundary when the camera does not
+            # change, so playback can explain crosstalk/silence/interjections.
+            result.append(clip)
             i += 1
         elif i == 0:
             # First clip too short → merge into following (incoming speaker)
@@ -469,7 +514,7 @@ def generate_cdl(
 
         if it["kind"] == "solo":
             angle_id = speaker_to_angle.get(it["speaker"])
-            reason = f"speaker:{it['speaker']}"
+            reason = it.get("reason") or f"speaker:{it['speaker']}"
         elif it["kind"] == "overlap" and overlap_to_wide:
             angle_id = wide_angle_id
             reason = it.get("reason") or "overlap:wide"
@@ -511,7 +556,11 @@ def generate_cdl(
             new_in = max(0, t_in - lead_in_ms)
             new_out = t_in + dur + tail_ms
 
-            if adjusted and adjusted[-1]["angle_id"] == clip["angle_id"]:
+            if (
+                adjusted
+                and adjusted[-1]["angle_id"] == clip["angle_id"]
+                and adjusted[-1].get("reason") == clip.get("reason")
+            ):
                 adjusted[-1]["dur_ms"] = new_out - adjusted[-1]["timeline_in_ms"]
             else:
                 if adjusted and new_in < adjusted[-1]["timeline_in_ms"] + adjusted[-1]["dur_ms"]:
@@ -585,13 +634,12 @@ def generate_cdl(
             offset = sync_offsets.get(clip["angle_id"], 0)
             src_in = _frame_round(t_in - offset, fps_num, fps_den)
 
-            snapped.append({
+            snapped.append(_with_shot_reason({
                 "angle_id": clip["angle_id"],
                 "src_in_ms": src_in,
                 "timeline_in_ms": t_in,
                 "dur_ms": dur,
-                "reason": clip["reason"],
-            })
+            }, clip["reason"]))
 
     # ── Step 6: Build CDL ────────────────────────────────────────────
     return {

@@ -1,0 +1,14 @@
+# Deny by default: only files required by the application and WhisperX builds
+# may enter the Docker build context. Local env files, private media, Git data,
+# caches, tests, docs, and agent state therefore never reach the builder.
+**
+!.dockerignore
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!src/
+!src/**
+!scripts/
+!scripts/**
+!services/
+!services/**

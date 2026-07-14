@@ -13,3 +13,10 @@ node_modules/
 dist/
 build/
 .DS_Store
+
+# Hermes session-local plans and state. Canonical project plans belong in docs/plans/.
+.hermes/
+
+# Consent-controlled local benchmark media and derived analysis caches.
+# Keep these out of source control; only labels/metrics under tests/fixtures are versioned.
+testmedia/

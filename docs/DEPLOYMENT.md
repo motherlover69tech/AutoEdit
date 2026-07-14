@@ -9,6 +9,8 @@ Browser
   → Nginx Proxy Manager TLS at https://ingest.peteflix.uk
   → AUTOEDIT app on http://192.168.50.50:8010 using host networking
   → Peter's central MySQL server at 192.168.50.50:3306
+  → Ollama at http://192.168.50.50:11434
+  → optional internal WhisperX GPU service on http://127.0.0.1:8011
   → media on /mnt/user/automulticam mounted as /data
 ```
 
@@ -96,12 +98,72 @@ Expected `docker compose config` shape:
 | `DB_USER` | yes | `autoedit` | Application DB user. |
 | `DB_PASSWORD` | yes | secret store | Never commit. |
 | `OLLAMA_BASE_URL` | no | `http://192.168.50.50:11434` | Current code reads this name. Do not use `LLM_BASE_URL`. |
-| `LLM_MODEL` | no | `gemma4:12b-q4-68k` | Ollama model alias for LLM-backed paths. |
-| `WHISPER_BACKEND` | no | `mock` | Real faster-whisper is not wired yet. |
-| `DIARIZE_BACKEND` | no | `mock` | Real diarization backend is not wired yet. |
+| `LLM_MODEL` | no | `hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M` | Current Ollama-only client model and planned local fallback. DeepSeek-primary provider chaining is not implemented yet. |
+| `WHISPER_BACKEND` | no | `mock` | Use `whisperx` only after the opt-in GPU service passes the live gates below. Unknown/unavailable backends fail explicitly. |
+| `WHISPER_MODEL` | no | `large-v3` | WhisperX ASR model name. |
+| `WHISPERX_BASE_URL` | no | `http://127.0.0.1:8011` | Internal service URL; do not expose through NPM. |
+| `WHISPERX_TIMEOUT_SECONDS` | no | `3600` | Long request timeout for model loading/transcription. |
+| `WHISPER_LANGUAGE` | no | `en` | App and worker must use the same fixed language; the current Compose profile defaults to English. |
+| `WHISPER_BATCH_SIZE` | no | `4` | Conservative V100 default; raise only after VRAM measurement. |
+| `WHISPER_COMPUTE_TYPE` | no | `float16` | Isolated V100 FP16/model smokes passed; rerun Compose-managed readiness/timing/VRAM acceptance before enablement. |
+| `WHISPER_ALIGN` | no | `true` | Forced alignment supplies word timestamps. |
+| `DIARIZE_BACKEND` | no | `mock` | Real diarization is not enabled; isolated mapped speaker channels are transcribed separately. |
 | `UPLOAD_MAX_CHUNK_BYTES` | no | `67108864` | Current code reads bytes. Do not use `UPLOAD_CHUNK_MB`. |
 | `PROXY_ENCODER` | no | `h264_vaapi` | Verified Intel hardware encode path in the container. Use `libx264` for software fallback; do not use `h264_qsv` until QSV MFX initialization is fixed. |
 | `CUT_MIN_SHOT_MS` | no | `250` | Direct-cut micro-guard only. Raise in a per-cut/project override if an edit is too twitchy. |
+
+## Opt-in WhisperX GPU service
+
+`docker-compose.gpu-ai.yml` adds a separate CUDA/WhisperX service instead of putting
+PyTorch and CUDA into the VAAPI-enabled AUTOEDIT web image. The service shares
+`/mnt/user/automulticam` as read-only `/data`; requests are path-confined to that
+mount. It is internal host-network traffic only and must not be added to NPM.
+
+The current target is the NVIDIA Tesla V100 32 GB. The application-facing adapter
+still uses isolated mapped speaker WAVs for WhisperX ASR/alignment transport. Local
+versioned-artifact, synchronized-analysis-audio, queued-diarization, overlap, and
+speaker-mapping components exist, but the application does **not** yet import those
+resolved turns as authoritative transcript/camera evidence. Production therefore
+remains mock-backed.
+
+Build and inspect without enabling real transcription:
+
+```bash
+export SESSION_SECRET='<from secret store>'
+export OPERATOR_PASSWORD='<from secret store>'
+export DB_PASSWORD='<from secret store>'
+export WHISPER_BACKEND=mock
+
+docker compose -f docker-compose.yml -f docker-compose.gpu-ai.yml \
+  --profile gpu-ai config
+docker compose -f docker-compose.yml -f docker-compose.gpu-ai.yml \
+  --profile gpu-ai up -d --build whisperx
+curl --fail http://127.0.0.1:8011/health
+curl --fail http://127.0.0.1:8011/ready
+```
+
+Production enablement gates (the isolated historical smokes do not replace this
+Compose-managed acceptance run):
+
+1. Confirm `nvidia-smi` sees the V100 inside the service container.
+2. Submit a short real WAV under `/mnt/user/automulticam` directly to
+   `POST http://127.0.0.1:8011/v1/transcribe`; verify non-empty aligned words.
+3. Check three audible word boundaries against AUTOEDIT's player/master timeline;
+   each must be within one project frame after the stored channel sync offset.
+4. Measure peak VRAM with Dots TTS resident and Ollama unloaded. Start with batch
+   size 4; do not raise it without headroom.
+5. Only then set `WHISPER_BACKEND=whisperx` in deployment secrets and recreate the
+   app service. A service failure then returns a visible 502 and marks processing
+   errored; it never emits mock transcript text.
+
+Rollback the integration by setting `WHISPER_BACKEND=mock`, recreating `app`, and
+stopping `whisperx`. **Do not run `/transcribe` while mock is selected on a project
+whose real transcript must be retained:** mock intentionally generates fake test
+text and a successful mock run replaces the prior transcript. Backend, validation,
+or persistence failures preserve the previous transcript artifact and DB rows.
+
+The detailed staged plan is
+`docs/plans/gpu-ai-whisperx-llm-integration.md`.
 
 ## Auto-cut deployment behavior
 
@@ -172,8 +234,8 @@ After `docker compose up -d --build` and NPM routing are in place:
 
 Do not advertise these as production-complete until implemented and verified:
 
-- Transcription currently uses `mock_transcribe()`.
-- Diarization currently uses `mock_diarize()` / simple channel mapping.
+- Real WhisperX transcription now has an opt-in service/client path, but production remains `WHISPER_BACKEND=mock` until the V100 image, real-WAV timing, and VRAM gates pass.
+- Diarization currently uses `mock_diarize()` / explicit channel mapping; WhisperX diarization is intentionally not enabled for isolated speaker WAVs.
 - Topic segmentation can use Ollama but still has mock fallback behavior.
 - YouTube title generation is deterministic/template-based.
 - Pipeline processing is an in-process background thread, not Redis/worker infrastructure.

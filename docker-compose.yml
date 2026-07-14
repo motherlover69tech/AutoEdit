@@ -36,12 +36,13 @@ services:
       DB_USER: autoedit
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deployment secrets}
 
-      # Local AI services. Keep mock backends explicit until real implementations land.
+      # Local AI services. Keep speech backends explicit/mock until the opt-in
+      # WhisperX implementation passes every production acceptance gate.
       OLLAMA_BASE_URL: http://192.168.50.50:11434
-      LLM_MODEL: ${LLM_MODEL:-gemma4:12b-q4-68k}
-      # These backends are intentionally pinned to mock until real faster-whisper
-      # and diarization implementations are wired and tested. Do not allow stale
-      # .env values to make the deployment claim production AI behavior.
+      LLM_MODEL: ${LLM_MODEL:-hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M}
+      # The base deployment remains pinned to mocks. Enable WhisperX only through
+      # the opt-in overlay after its ASR/alignment/diarization acceptance gates pass;
+      # stale .env values must not make the base deployment claim production AI.
       WHISPER_BACKEND: mock
       WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
       DIARIZE_BACKEND: mock

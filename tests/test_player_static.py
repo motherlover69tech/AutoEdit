@@ -66,6 +66,9 @@ def test_authenticated_player_shell_contains_media_elements_and_assets(auth_play
     assert 'id="angleButtons"' in html
     assert 'id="qualitySelect"' in html
     assert 'id="statusText"' in html
+    assert 'id="shotReason"' in html
+    assert 'id="shotReasonLabel"' in html
+    assert 'id="shotReasonDetail"' in html
     assert "player.js" in html
     assert "styles.css" in html
 

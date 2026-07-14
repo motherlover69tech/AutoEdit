@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -32,6 +33,7 @@ def auth_client(tmp_path: Path):
         engine=engine, data_root=tmp_path, auth_enabled=True,
         operator_password="pw", session_secret="secret",
         public_domain="autoedit.example.com", session_cookie_secure=False,
+        whisper_backend="mock",
     )
     client = TestClient(app)
     login = client.post("/auth/login", json={"password": "pw", "display_name": "P"})
@@ -247,6 +249,7 @@ def test_transcribe_populates_database(project_with_wavs):
         response = client.post(f"/projects/{pid}/transcribe")
 
     assert response.status_code == 200
+    assert [call.kwargs["start_ms"] for call in mock_fn.call_args_list] == [0, -50]
     result = response.json()
     assert "segments" in result
     assert len(result["segments"]) >= 2
@@ -296,13 +299,7 @@ def test_transcribe_writes_json_file(project_with_wavs):
 
 def test_transcribe_applies_sync_offset(project_with_wavs):
     """Channel with sync_offset_ms=50 should have offset applied to segment times."""
-    client, data_root, engine, pid = project_with_wavs
-
-    # Find the interviewee channel (sync_offset_ms=50 on its source angle)
-    with Session(engine) as session:
-        ch_rows = session.execute(
-            select(audio_channels).where(audio_channels.c.project_id == pid)
-        ).all()
+    client, _, _, pid = project_with_wavs
 
     with patch("autoedit.api.mock_transcribe") as mock_fn:
         mock_fn.return_value = {
@@ -316,12 +313,10 @@ def test_transcribe_applies_sync_offset(project_with_wavs):
 
     assert response.status_code == 200
     # The mock returns segments with start_ms=0 for both, but the endpoint
-    # should call mock_transcribe with the correct start_ms (sync offset).
-    # We verify the call was made with correct start_ms.
+    # should convert the stored source delay to a source-to-master shift.
     calls = mock_fn.call_args_list
-    # At least one call should have start_ms != 0 (the one with offset 50)
     offsets_used = [call.kwargs.get("start_ms", 0) for call in calls]
-    assert any(o > 0 for o in offsets_used)
+    assert offsets_used == [0, -50]
 
 
 def test_transcribe_idempotent(project_with_wavs):
@@ -360,6 +355,51 @@ def test_transcribe_idempotent(project_with_wavs):
     assert count2 == count1
 
 
+def test_transcribe_rejects_concurrent_run_for_same_project(project_with_wavs):
+    client, _, _, pid = project_with_wavs
+    second_client = TestClient(client.app)
+    login = second_client.post("/auth/login", json={"password": "pw", "display_name": "P2"})
+    assert login.status_code == 204
+
+    started = threading.Event()
+    release = threading.Event()
+    first_responses = []
+
+    def slow_transcribe(*args, **kwargs):
+        started.set()
+        assert release.wait(timeout=5)
+        return {
+            "segments": [
+                {
+                    "speaker": kwargs.get("speaker_label"),
+                    "start_ms": max(0, kwargs.get("start_ms", 0)),
+                    "end_ms": 1000,
+                    "text": "Test.",
+                    "words": [],
+                }
+            ]
+        }
+
+    with patch("autoedit.api.mock_transcribe", side_effect=slow_transcribe):
+        first = threading.Thread(
+            target=lambda: first_responses.append(
+                client.post(f"/projects/{pid}/transcribe")
+            )
+        )
+        first.start()
+        assert started.wait(timeout=5)
+        try:
+            concurrent = second_client.post(f"/projects/{pid}/transcribe")
+        finally:
+            release.set()
+            first.join(timeout=5)
+
+    assert not first.is_alive()
+    assert first_responses[0].status_code == 200
+    assert concurrent.status_code == 409
+    assert concurrent.json() == {"detail": "transcription already in progress"}
+
+
 def test_transcribe_correct_word_count(project_with_wavs):
     """Each segment has matching words list."""
     client, data_root, engine, pid = project_with_wavs
@@ -387,3 +427,89 @@ def test_transcribe_correct_word_count(project_with_wavs):
     assert response.status_code == 200
     result = response.json()
     assert len(result["segments"][0]["words"]) == word_count
+
+
+def test_transcribe_validates_every_mapped_wav_before_processing(project_with_wavs):
+    client, data_root, _, pid = project_with_wavs
+    missing = data_root / pid / "audio" / "ch_interviewee.wav"
+    missing.unlink()
+
+    with patch("autoedit.api.mock_transcribe") as mock_fn:
+        response = client.post(f"/projects/{pid}/transcribe")
+
+    assert response.status_code == 400
+    assert "interviewee" in response.json()["detail"]
+    mock_fn.assert_not_called()
+
+
+def test_transcribe_accepts_valid_silent_result(project_with_wavs):
+    client, data_root, engine, pid = project_with_wavs
+
+    with patch("autoedit.api.mock_transcribe", return_value={"segments": []}):
+        response = client.post(f"/projects/{pid}/transcribe")
+
+    assert response.status_code == 200
+    assert response.json() == {"segments": []}
+    transcript_path = data_root / pid / "transcript" / "transcript.json"
+    assert json.loads(transcript_path.read_text()) == {"segments": []}
+    with Session(engine) as session:
+        rows = session.execute(
+            select(transcript_segments).where(
+                transcript_segments.c.project_id == pid
+            )
+        ).all()
+    assert rows == []
+
+
+def test_transcribe_db_failure_preserves_last_known_good_state(project_with_wavs):
+    client, data_root, engine, pid = project_with_wavs
+    old_result = {
+        "segments": [
+            {
+                "speaker": "presenter",
+                "start_ms": 0,
+                "end_ms": 1000,
+                "text": "last known good",
+                "words": [],
+            }
+        ]
+    }
+    with patch("autoedit.api.mock_transcribe", return_value=old_result):
+        assert client.post(f"/projects/{pid}/transcribe").status_code == 200
+
+    transcript_path = data_root / pid / "transcript" / "transcript.json"
+    old_artifact = transcript_path.read_bytes()
+    with Session(engine) as session:
+        old_rows = session.execute(
+            select(transcript_segments.c.text).where(
+                transcript_segments.c.project_id == pid
+            ).order_by(transcript_segments.c.id)
+        ).all()
+
+    new_result = {
+        "segments": [
+            {
+                "speaker": "presenter",
+                "start_ms": 0,
+                "end_ms": 1000,
+                "text": "must not publish",
+                "words": [],
+            }
+        ]
+    }
+    with (
+        patch("autoedit.api.mock_transcribe", return_value=new_result),
+        patch.object(transcript_segments, "insert", side_effect=RuntimeError("db down")),
+    ):
+        response = client.post(f"/projects/{pid}/transcribe")
+
+    assert response.status_code == 500
+    assert "previous transcript was preserved" in response.json()["detail"]
+    assert transcript_path.read_bytes() == old_artifact
+    with Session(engine) as session:
+        rows_after = session.execute(
+            select(transcript_segments.c.text).where(
+                transcript_segments.c.project_id == pid
+            ).order_by(transcript_segments.c.id)
+        ).all()
+    assert rows_after == old_rows

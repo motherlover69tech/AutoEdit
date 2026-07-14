@@ -1,0 +1,55 @@
+{
+  "schema_version": "1.0",
+  "fixture_id": "consent-controlled-local-fixture",
+  "consent_status": "local operator-cleared media; raw paths, measurements, and fingerprints are not committed",
+  "master_source_id": "source-b",
+  "sync_offset_convention": "source_ms=master_ms+sync_offset_ms",
+  "sources": [
+    {
+      "source_id": "source-a",
+      "role": "closeup",
+      "sync_measurement_recorded_locally": true
+    },
+    {
+      "source_id": "source-b",
+      "role": "closeup_with_guide_audio",
+      "sync_measurement_recorded_locally": true
+    },
+    {
+      "source_id": "source-c",
+      "role": "wide",
+      "sync_measurement_recorded_locally": true
+    }
+  ],
+  "aggregate_technical_metadata": {
+    "source_count": 3,
+    "video": {
+      "codec": "h264",
+      "width": 1920,
+      "height": 1080,
+      "fps": "24/1"
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate_hz": 48000,
+      "channels_per_source": 2,
+      "layout": "stereo"
+    }
+  },
+  "analysis_audio": {
+    "strategy": "isolated_lav",
+    "selected_source_id": "source-b",
+    "selected_channels": [
+      0,
+      1
+    ],
+    "derived_sample_rate_hz": 16000,
+    "derived_channels": 1,
+    "derivation_measurements_recorded_locally": true
+  },
+  "limitations": [
+    "Raw media, source filenames, exact durations and offsets, hashes, job identifiers, speaker identities, transcript excerpts, and exact evidence timestamps remain in the untracked local manifest.",
+    "Sync offsets and technical measurements must be recomputed if the local manifest changes.",
+    "The committed golden artifact is synthetic metadata-only scaffolding, not a production transcript."
+  ]
+}

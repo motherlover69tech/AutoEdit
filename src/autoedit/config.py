@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote_plus
 
-from pydantic import Field
+from pydantic import AnyHttpUrl, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,10 +42,30 @@ class Settings(BaseSettings):
 
     # LLM / AI settings
     ollama_base_url: str = Field(default="http://192.168.50.50:11434", alias="OLLAMA_BASE_URL")
-    llm_model: str = Field(default="gemma:34b", alias="LLM_MODEL")
-    whisper_backend: str = Field(default="mock", alias="WHISPER_BACKEND")  # mock, faster-whisper, whisper.cpp, ollama
+    llm_model: str = Field(
+        default="hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M", alias="LLM_MODEL"
+    )
+    whisper_backend: Literal["mock", "whisperx"] = Field(
+        default="mock", alias="WHISPER_BACKEND"
+    )
     whisper_model: str = Field(default="large-v3", alias="WHISPER_MODEL")
-    diarize_backend: str = Field(default="mock", alias="DIARIZE_BACKEND")  # mock, pyannote, whisperx
+    whisperx_base_url: AnyHttpUrl = Field(
+        default="http://127.0.0.1:8011", alias="WHISPERX_BASE_URL"
+    )
+    whisperx_timeout_seconds: float = Field(
+        default=3600.0, gt=0, le=7200, alias="WHISPERX_TIMEOUT_SECONDS"
+    )
+    whisper_language: str | None = Field(default="en", alias="WHISPER_LANGUAGE")
+    whisper_batch_size: int = Field(
+        default=4, ge=1, le=64, alias="WHISPER_BATCH_SIZE"
+    )
+    whisper_compute_type: Literal["float16", "int8_float16", "int8"] = Field(
+        default="float16", alias="WHISPER_COMPUTE_TYPE"
+    )
+    whisper_align: bool = Field(default=True, alias="WHISPER_ALIGN")
+    diarize_backend: Literal["mock", "pyannote", "whisperx"] = Field(
+        default="mock", alias="DIARIZE_BACKEND"
+    )
 
     @property
     def sqlalchemy_url(self) -> str:

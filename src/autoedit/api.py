@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 
 import json
 import shutil
+import threading
 import time
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, status
@@ -35,7 +36,7 @@ from autoedit.audio import SyncQualityError, compute_sync_offsets, extract_chann
 from autoedit.conciseness import grade_conciseness
 from autoedit.config import Settings
 from autoedit.cdl_validator import frame_boundary_ms, ms_to_frames as cdl_ms_to_frames, validate_cdl
-from autoedit.cut_engine import DEFAULT_CUT_PARAMS, generate_cdl
+from autoedit.cut_engine import DEFAULT_CUT_PARAMS, _with_shot_reason, generate_cdl
 from autoedit.db.migrate import run_migrations
 from autoedit.db.schema import (
     angles,
@@ -59,7 +60,7 @@ from autoedit.diarize import mock_diarize
 from autoedit.probe import probe_source_file
 from autoedit.program_audio import generate_program_audio
 from autoedit.project_paths import is_ulid, project_root
-from autoedit.transcribe import mock_transcribe
+from autoedit.transcribe import mock_transcribe, transcribe_with_backend
 from autoedit.projects import create_project as create_project_record
 from autoedit.projects import get_project as get_project_record
 from autoedit.projects import new_ulid
@@ -228,6 +229,7 @@ def create_app(
     session_cookie_name: str | None = None,
     session_cookie_secure: bool | None = None,
     upload_max_chunk_bytes: int | None = None,
+    whisper_backend: str | None = None,
     sync_fn: object | None = None,
 ) -> FastAPI:
     settings = Settings()
@@ -271,6 +273,24 @@ def create_app(
         if upload_max_chunk_bytes is not None
         else settings.upload_max_chunk_bytes
     )
+    app_whisper_backend = whisper_backend or settings.whisper_backend
+    app_whisper_backend = app_whisper_backend.strip().lower()
+    if (
+        whisper_backend is not None
+        and app_whisper_backend not in {"mock", "whisperx"}
+    ):
+        raise ValueError(
+            f"unsupported WHISPER_BACKEND {app_whisper_backend!r}; expected mock or whisperx"
+        )
+    app_ai_settings = settings.model_copy(
+        update={"whisper_backend": app_whisper_backend}
+    )
+    transcription_locks: dict[str, threading.Lock] = {}
+    transcription_locks_guard = threading.Lock()
+
+    def _transcription_lock(project_id: str) -> threading.Lock:
+        with transcription_locks_guard:
+            return transcription_locks.setdefault(project_id, threading.Lock())
 
     def _proxy_filename(angle_id: str) -> str:
         return f"{angle_id}.proxy.mp4"
@@ -2700,13 +2720,12 @@ def create_app(
             if dur <= 0:
                 return None
             src_in = _snap_ms(t_in - int(sync_offsets.get(angle_id, 0)))
-            return {
+            return _with_shot_reason({
                 "angle_id": angle_id,
                 "src_in_ms": src_in,
                 "timeline_in_ms": t_in,
                 "dur_ms": dur,
-                "reason": reason,
-            }
+            }, reason)
 
         def _clip_within_source(clip: dict) -> bool:
             src_in = int(clip["src_in_ms"])
@@ -2922,8 +2941,7 @@ def create_app(
                 "reason": "LLM review failed or unavailable",
             }
 
-    @app.post("/projects/{project_id}/transcribe")
-    def transcribe_audio(project_id: str) -> dict:
+    def _transcribe_audio_locked(project_id: str) -> dict:
         project = get_project_record(app_engine, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="project not found")
@@ -2946,70 +2964,126 @@ def create_app(
         project_dir = project_root(app_data_root, project_id)
         audio_dir = project_dir / "audio"
 
-        all_segments = []
+        import wave as _wave
+
+        prepared_channels = []
         for ch in ch_rows:
+            channel_name = ch.speaker_label or ch.id
             if not ch.wav_path:
-                continue
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"audio channel {channel_name!r} has no WAV path — run /sync first",
+                )
             wav_abs = audio_dir / ch.wav_path.split("/")[-1]
             if not wav_abs.is_file():
-                continue
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"WAV for audio channel {channel_name!r} is missing — run /sync first",
+                )
+            try:
+                with _wave.open(str(wav_abs), "rb") as wf:
+                    framerate = wf.getframerate()
+                    nframes = wf.getnframes()
+            except (_wave.Error, OSError) as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"WAV for audio channel {channel_name!r} is invalid: {exc}",
+                ) from exc
+            if framerate <= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"WAV for audio channel {channel_name!r} has an invalid sample rate",
+                )
+            prepared_channels.append((ch, wav_abs, framerate, nframes))
 
-            import wave as _wave
-            with _wave.open(str(wav_abs), "rb") as wf:
-                framerate = wf.getframerate()
-                nframes = wf.getnframes()
-
-            offset = int(offset_by_angle.get(ch.source_angle_id, 0))
-            result = mock_transcribe(
-                framerate,
-                duration_samples=nframes,
-                start_ms=offset,
-                speaker_label=ch.speaker_label,
-            )
+        all_segments = []
+        for ch, wav_abs, framerate, nframes in prepared_channels:
+            # Stored convention: source_ms = master_ms + sync_offset_ms.
+            # Transcription needs source -> master, so subtract exactly once.
+            timeline_shift_ms = -int(offset_by_angle.get(ch.source_angle_id, 0))
+            if app_whisper_backend.strip().lower() == "mock":
+                # Keep this direct call as a stable test seam and as the explicit
+                # development backend. Production backends must never silently
+                # fall back to generated transcript text.
+                result = mock_transcribe(
+                    framerate,
+                    duration_samples=nframes,
+                    start_ms=timeline_shift_ms,
+                    speaker_label=ch.speaker_label,
+                )
+            else:
+                try:
+                    result = transcribe_with_backend(
+                        wav_abs,
+                        settings=app_ai_settings,
+                        start_ms=timeline_shift_ms,
+                        speaker_label=ch.speaker_label,
+                    )
+                except (RuntimeError, ValueError) as exc:
+                    set_project_status(app_engine, project_id, "error")
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"transcription backend failed: {exc}",
+                    ) from exc
 
             for seg in result["segments"]:
                 seg["channel_id"] = ch.id
             all_segments.extend(result["segments"])
 
-        if not all_segments:
-            raise HTTPException(
-                status_code=400,
-                detail="no WAV files found — run /sync first",
-            )
-
-        # Write transcript.json
+        # Stage the artifact first. If the single DB replacement transaction fails,
+        # restore the previous artifact so callers retain the last-known-good pair.
         transcript_dir = project_dir / "transcript"
         transcript_dir.mkdir(parents=True, exist_ok=True)
         result_doc = {"segments": all_segments}
+        transcript_path = transcript_dir / "transcript.json"
         tmp_path = transcript_dir / "transcript.json.tmp"
+        old_artifact = transcript_path.read_bytes() if transcript_path.is_file() else None
         tmp_path.write_text(json.dumps(result_doc, indent=2) + "\n")
-        tmp_path.replace(transcript_dir / "transcript.json")
+        tmp_path.replace(transcript_path)
 
-        # Persist to transcript_segments (idempotent: delete old first)
-        with Session(app_engine) as session:
-            session.execute(
-                transcript_segments.delete().where(
-                    transcript_segments.c.project_id == project_id
-                )
-            )
-            session.commit()
-
-        with Session(app_engine) as session:
-            for seg in all_segments:
+        try:
+            with Session(app_engine) as session, session.begin():
                 session.execute(
-                    transcript_segments.insert().values(
-                        project_id=project_id,
-                        channel_id=seg["channel_id"],
-                        start_ms=seg["start_ms"],
-                        end_ms=seg["end_ms"],
-                        text=seg["text"],
-                        words_json=seg.get("words", []),
+                    transcript_segments.delete().where(
+                        transcript_segments.c.project_id == project_id
                     )
                 )
-            session.commit()
+                for seg in all_segments:
+                    session.execute(
+                        transcript_segments.insert().values(
+                            project_id=project_id,
+                            channel_id=seg["channel_id"],
+                            start_ms=seg["start_ms"],
+                            end_ms=seg["end_ms"],
+                            text=seg["text"],
+                            words_json=seg.get("words", []),
+                        )
+                    )
+        except Exception as exc:
+            restore_path = transcript_dir / "transcript.json.restore"
+            if old_artifact is None:
+                transcript_path.unlink(missing_ok=True)
+            else:
+                restore_path.write_bytes(old_artifact)
+                restore_path.replace(transcript_path)
+            set_project_status(app_engine, project_id, "error")
+            raise HTTPException(
+                status_code=500,
+                detail="transcript persistence failed; previous transcript was preserved",
+            ) from exc
 
         _check_and_update_status(project_id)
         return result_doc
+
+    @app.post("/projects/{project_id}/transcribe")
+    def transcribe_audio(project_id: str) -> dict:
+        lock = _transcription_lock(project_id)
+        if not lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="transcription already in progress")
+        try:
+            return _transcribe_audio_locked(project_id)
+        finally:
+            lock.release()
 
     @app.post("/projects/{project_id}/segment-topics")
     def segment_topics(project_id: str) -> dict:

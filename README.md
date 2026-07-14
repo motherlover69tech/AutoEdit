@@ -7,7 +7,7 @@ Self-hosted multicam auto-edit platform for three-angle interview footage.
 1. Read `AI_HANDOFF.md` first — it is the current session handoff and should tell you what to do next without needing chat history.
 2. Read `jobs/BACKLOG.md` for stage status, dependencies, and completion gates.
 3. Read `docs/plans/TESTING_STRATEGY.md` before changing code or marking anything done.
-4. **Current next job:** continue post-remediation manual/browser gates: real upload/sync/proxy/player smoke with central MySQL and NPM.
+4. **Current engineering pickup:** continue the unresolved Phase 4/acceptance gates in `docs/plans/ai-gpu-1-corrective-pickup.md`: frame-level timing, operator-confirmed speaker identity, speaker-turn cut generation, and the consent-cleared benchmark. Keep production AI backends on mock until acceptance.
 5. Read source docs only when you need deeper spec details:
    - `docs/source/multicam_autoedit_spec.md`
    - `docs/source/multicam_ui_style_guide.html`
@@ -16,8 +16,8 @@ Self-hosted multicam auto-edit platform for three-angle interview footage.
 
 - Backend: Python 3.12 + FastAPI + SQLAlchemy Core + pytest, managed with `uv`.
 - Frontend: Stage 7.4 notes (multi-author markers + list panel + add-note form) + Stage 7.3 per-angle LUT + Stage 7.2 timeline lanes + Stage 7.1 player shell via static web shell.
-- Latest local verification: `env -u VIRTUAL_ENV uv run pytest -q` → **489 passed, 2 skipped**.
-- Compile check: `python -m compileall -q src tests` passes.
+- Final reconciliation verification: `env -u VIRTUAL_ENV uv run pytest -q` → **685 passed, 2 skipped**.
+- The final commit gate also runs compilation, lock/dependency checks, and `git diff --check` after all reconciliation edits.
 - Auto-cut Direct defaults are live-deployed on Unraid: `min_shot_ms=250`, no lead/tail delay, overlap→wide, silence→wide. Existing cuts keep stored params until regenerated; `sm test` was regenerated as `Direct rough cut`.
 - Processing now includes an analysis-only `level_normalization` stage after noise-floor. It writes `audio/level_normalization.json` and normalizes activity `levels` for dominance/cross-bleed decisions without altering source WAVs or program audio.
 - Ingest/channel mapping UI now separates camera sources from speaker channels: upload labels are Camera A/B/Wide, probe metadata persists into `/assets`, and audio-channel rows no longer auto-select presenter/interviewee defaults.
@@ -30,7 +30,7 @@ Self-hosted multicam auto-edit platform for three-angle interview footage.
 | 3 — Ingest & normalisation | 3.1–3.6, 3.5b | ✅ Complete locally |
 | 4 — Audio analysis & VAD | 4.1, 4.2, 4.3, 4.4, 4.6 | ✅ Complete locally |
 | — Speaker diarization | diarize | ✅ Placeholder/mock complete locally |
-| 5 — Transcription & AI | 5.1, 5.2, 5.3, 5.5 | 🔄 Mock/deterministic + Ollama fallback; production Whisper/LLM truth pass pending |
+| 5 — Transcription & AI | 5.1, 5.2, 5.3, 5.5 | 🔄 Mock/deterministic + local Ollama option; authoritative Whisper import and planned DeepSeek→Qwen provider chain pending |
 | 6 — Auto-cut engine | 6.1, 6.2, 6.3 | ✅ Complete locally |
 | — Pipeline progress | progress | ✅ Progress tracking + process runner + processing UI |
 | HARDEN-1 — Internal review fixes | review hardening | ✅ Complete locally |
@@ -42,9 +42,9 @@ Self-hosted multicam auto-edit platform for three-angle interview footage.
 
 ## Immediate next action
 
-1. Run a real browser/manual smoke through the live NPM route: login, create/open project, upload small fixture media, channel map, sync, proxy, and player open.
-2. Continue to avoid documenting mock transcription/diarization, template titles, and in-process pipeline execution as production-complete.
-3. Keep the historical `autoedit-mysql` container stopped unless explicitly needed for rollback/testing.
+1. Continue the remaining real-AI acceptance gates: consent-cleared labels/metrics, frame-level word-timing review, operator-confirmed speaker identity, and speaker-turn cut generation.
+2. Implement the provider-neutral `deepseek-v4-flash` → local Qwen3.5 9B chain only after the authoritative transcript path is accepted; remove randomized mock degradation and record provider/fallback provenance.
+3. Keep `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock` until acceptance. The Stage 7.4 browser/XSS gate remains a separate parallel manual task.
 
 ## Test commands
 

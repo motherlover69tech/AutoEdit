@@ -1,0 +1,72 @@
+# Opt-in GPU AI overlay for AUTOEDIT.
+#
+# Start only after supplying the normal production secrets:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu-ai.yml \
+#     --profile gpu-ai up -d --build
+#
+# Keep WHISPER_BACKEND=mock until the live WhisperX smoke gates pass. Then set
+# WHISPER_BACKEND=whisperx in the deployment environment and recreate `app`.
+
+services:
+  app:
+    environment:
+      WHISPER_BACKEND: ${WHISPER_BACKEND:-mock}
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      # The canonical app uses host networking, so it cannot resolve Compose
+      # service DNS. Reach the worker through its loopback-only published port.
+      WHISPERX_BASE_URL: http://127.0.0.1:8011
+      WHISPERX_TIMEOUT_SECONDS: ${WHISPERX_TIMEOUT_SECONDS:-3600}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-en}
+      WHISPER_BATCH_SIZE: ${WHISPER_BATCH_SIZE:-4}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-float16}
+      WHISPER_ALIGN: ${WHISPER_ALIGN:-true}
+
+  whisperx:
+    profiles: ["gpu-ai"]
+    build:
+      context: .
+      dockerfile: services/whisperx_service/Dockerfile
+    restart: unless-stopped
+    gpus: all
+    # The app runs on the host network. Publish only to host loopback so the
+    # worker is reachable by AUTOEDIT but never exposed to the LAN or NPM.
+    ports:
+      - "127.0.0.1:8011:8011"
+    command:
+      - python3
+      - -m
+      - uvicorn
+      - services.whisperx_service.app:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8011"
+    environment:
+      DATA_ROOT: /data
+      WHISPERX_DEVICE: cuda
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3}
+      WHISPER_BATCH_SIZE: ${WHISPER_BATCH_SIZE:-4}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-float16}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-en}
+      WHISPER_ALIGN: ${WHISPER_ALIGN:-true}
+      WHISPER_DIARIZE: ${WHISPER_DIARIZE:-false}
+      WHISPER_DIARIZATION_MODEL: ${WHISPER_DIARIZATION_MODEL:-pyannote/speaker-diarization-3.1}
+      # Optional gated-model token. Supply through the deployment environment;
+      # never commit it to either env file.
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /models/huggingface
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8011/ready', timeout=30).read()
+      interval: 30s
+      timeout: 35s
+      retries: 3
+      start_period: 10m
+    volumes:
+      - /mnt/user/automulticam:/data:ro
+      - /mnt/user/appdata/autoedit/whisperx-models:/models
