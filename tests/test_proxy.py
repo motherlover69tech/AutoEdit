@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session
 
 from autoedit.api import create_app
+from autoedit.config import Settings
 from autoedit.db.migrate import run_migrations
 from autoedit.db.schema import angles
 from autoedit.proxy import generate_proxy
@@ -26,6 +27,7 @@ def auth_client(tmp_path: Path, monkeypatch):
     # so pin the software encoder to keep the assertions environment-independent
     # (they previously broke on any host with a /dev/dri node).
     monkeypatch.setenv("PROXY_ENCODER", "libx264")
+    monkeypatch.setenv("PROXY_CRF", "16")
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -246,6 +248,22 @@ def test_proxy_uses_correct_ffmpeg_args(project_with_angle):
     assert "-an" in cmd  # no audio
     assert "-movflags" in cmd or "+faststart" in cmd_str  # faststart
     assert "-vf" in cmd and "scale" in " ".join(cmd)  # scale filter
+    assert "-crf" in cmd and cmd[cmd.index("-crf") + 1] == "16"
+
+
+def test_proxy_quality_defaults_promote_previous_normal_quality_to_low():
+    settings = Settings(_env_file=None)
+
+    assert settings.proxy_crf == 16
+    assert settings.proxy_low_crf == 20
+
+    repo_root = Path(__file__).parents[1]
+    compose = (repo_root / "docker-compose.yml").read_text()
+    env_example = (repo_root / ".env.example").read_text()
+    assert "PROXY_CRF: ${PROXY_CRF:-16}" in compose
+    assert "PROXY_LOW_CRF: ${PROXY_LOW_CRF:-20}" in compose
+    assert "PROXY_CRF=16" in env_example
+    assert "PROXY_LOW_CRF=20" in env_example
 
 
 def test_generate_proxy_uses_vaapi_hw_decode_and_encode_args():

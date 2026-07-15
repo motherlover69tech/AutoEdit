@@ -11,7 +11,7 @@ def generate_proxy(
     encoder: str = "h264_vaapi",
     gop: int = 12,
     height: int = 720,
-    crf: int = 20,
+    crf: int = 16,
     plog = None,
 ) -> None:
     """Generate a silent short-GOP playback proxy using ffmpeg.

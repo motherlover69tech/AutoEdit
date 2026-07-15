@@ -22,6 +22,7 @@ def auth_client(tmp_path: Path, monkeypatch):
     # so pin the software encoder to keep the assertions environment-independent
     # (they previously broke on any host with a /dev/dri node).
     monkeypatch.setenv("PROXY_ENCODER", "libx264")
+    monkeypatch.setenv("PROXY_LOW_CRF", "20")
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -165,7 +166,7 @@ def test_bulk_proxy_low_generates_for_all_angles(auth_client):
             assert "proxy_low/" in row.proxy_low_path
 
 
-def test_proxy_low_uses_lower_height_and_crf(project_with_angle):
+def test_proxy_low_uses_lower_height_and_previous_normal_crf(project_with_angle):
     project_body, angle, client, data_root, engine = project_with_angle
     pid = project_body["id"]
     aid = angle["id"]
@@ -187,7 +188,7 @@ def test_proxy_low_uses_lower_height_and_crf(project_with_angle):
     assert len(captured_calls) == 1
     cmd_str = " ".join(str(c) for c in captured_calls[0])
     assert "scale=-2:360" in cmd_str, f"Expected 360p scale, got: {cmd_str}"
-    assert "-crf" in cmd_str and "26" in cmd_str, f"Expected CRF 26, got: {cmd_str}"
+    assert "-crf" in cmd_str and "20" in cmd_str, f"Expected CRF 20, got: {cmd_str}"
 
 
 def test_proxy_low_idempotent(project_with_angle):

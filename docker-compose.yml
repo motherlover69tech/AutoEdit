@@ -55,9 +55,11 @@ services:
       PROXY_ENCODER: h264_vaapi
       PROXY_GOP: ${PROXY_GOP:-12}
       PROXY_HEIGHT: ${PROXY_HEIGHT:-720}
-      PROXY_CRF: ${PROXY_CRF:-20}
+      # VAAPI treats these as QP values; lower means higher quality/bitrate.
+      PROXY_CRF: ${PROXY_CRF:-16}
       PROXY_LOW_HEIGHT: ${PROXY_LOW_HEIGHT:-360}
-      PROXY_LOW_CRF: ${PROXY_LOW_CRF:-26}
+      # Preserve the previous normal quality target for the low tier.
+      PROXY_LOW_CRF: ${PROXY_LOW_CRF:-20}
       VAD_DEFAULT_HANGOVER_MS: ${VAD_DEFAULT_HANGOVER_MS:-300}
       CUT_MIN_SHOT_MS: ${CUT_MIN_SHOT_MS:-250}
     devices:

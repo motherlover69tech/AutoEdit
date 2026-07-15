@@ -27,10 +27,10 @@ class Settings(BaseSettings):
     proxy_encoder: str = Field(default="h264_vaapi", alias="PROXY_ENCODER")
     proxy_gop: int = Field(default=12, alias="PROXY_GOP")
     proxy_height: int = Field(default=720, alias="PROXY_HEIGHT")
-    proxy_crf: int = Field(default=20, alias="PROXY_CRF")
+    proxy_crf: int = Field(default=16, ge=0, le=51, alias="PROXY_CRF")
 
     proxy_low_height: int = Field(default=360, alias="PROXY_LOW_HEIGHT")
-    proxy_low_crf: int = Field(default=26, alias="PROXY_LOW_CRF")
+    proxy_low_crf: int = Field(default=20, ge=0, le=51, alias="PROXY_LOW_CRF")
 
     upload_max_chunk_bytes: int = Field(default=64 * 1024 * 1024, alias="UPLOAD_MAX_CHUNK_BYTES")
 
