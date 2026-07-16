@@ -252,36 +252,26 @@ DUMP_GZ="${DUMP_FILE}.gz"
 # Run the entire dump sequence inside the mysql container so it hits the
 # local Unix socket.  --no-tablespaces, --skip-lock-tables, --skip-add-locks
 # keep the lowest possible privilege footprint on MySQL 9.
+# Autoedit user lacks RELOAD, so we go straight to table-by-table dump.
 docker exec -e MYSQL_PWD="__DB_PASSWORD_CREDENTIAL__" "${MYSQL_CONT}" \
   sh -c '
     set -e
-    mysqldump -u autoedit --socket=/var/run/mysqld/mysqld.sock \
-      autoedit \
-      --single-transaction \
-      --no-tablespaces \
-      --skip-lock-tables \
-      --skip-add-locks \
-      --routines \
-      --triggers \
-      2>/tmp/dump-err.txt \
-    | gzip > /tmp/autoedit-db.sql.gz
-    if [ -s /tmp/autoedit-db.sql.gz ]; then
-      exit 0
-    fi
-    # Fallback: table-by-table for limited-privilege users
-    echo "[tower] single-transaction dump failed, trying table-by-table..."
     TABLES=$(mysql -u autoedit --socket=/var/run/mysqld/mysqld.sock \
-      autoedit -N -B -e "SHOW TABLES;" 2>/dev/null) || true
-    if [ -n "$TABLES" ]; then
-      echo "[tower] Found tables: $(echo "$TABLES" | tr \"\\n\" \" \")"
-      echo "-- AUTOEDIT DB dump (table-by-table) $(date -u)" > /tmp/autoedit-db.sql
-      for tbl in $TABLES; do
-        echo "[tower]   dumping: $tbl"
-        mysqldump -u autoedit --socket=/var/run/mysqld/mysqld.sock \
-          autoedit "$tbl" \
-          --no-tablespaces --skip-lock-tables --skip-add-locks \
-          2>/dev/null >> /tmp/autoedit-db.sql || true
-      done
+      autoedit -N -B -e "SHOW TABLES;" 2>/dev/null)
+    if [ -z "$TABLES" ]; then
+      echo "[tower] No tables found in autoedit database" >&2
+      exit 1
+    fi
+    echo "[tower] Found tables: $(echo "$TABLES" | tr \"\\n\" \" \")"
+    echo "-- AUTOEDIT DB dump (table-by-table) $(date -u)" > /tmp/autoedit-db.sql
+    for tbl in $TABLES; do
+      echo "[tower]   dumping: $tbl"
+      mysqldump -u autoedit --socket=/var/run/mysqld/mysqld.sock \
+        autoedit "$tbl" \
+        --no-tablespaces --skip-lock-tables --skip-add-locks \
+        2>/dev/null >> /tmp/autoedit-db.sql
+    done
+    if [ -s /tmp/autoedit-db.sql ]; then
       gzip -f /tmp/autoedit-db.sql
       exit 0
     fi
