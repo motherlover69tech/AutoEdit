@@ -10,10 +10,15 @@
 # It NEVER uses inline single-quoted multiline SSH payloads.
 # Secrets are read from Tower-side env files — never passed through the worker.
 #
-# Usage:
+## Usage:
 #   bash scripts/autoedit-deploy.sh \
 #     --worktree /opt/data/workspace/AUTOEDIT/.worktrees/autoedit-integrated \
 #     --commit   c096e4e179291d910fbdb8864916318cbfd28c64
+#
+# Required:
+#   DB_PASSWORD_CREDENTIAL  (env var or --db-password) — MySQL autoedit user
+#                           password for the backup dump. Never passed on the
+#                           command line; set via env or --db-password.
 #
 # Optional:
 #   --files "src/autoedit/web/app.html,src/autoedit/web/app.js,..."
@@ -43,20 +48,28 @@ WORKTREE=""
 COMMIT=""
 FILE_LIST=""
 DRY_RUN=false
+DB_PASSWORD_CREDENTIAL="${DB_PASSWORD_CREDENTIAL:-}"
 
 # ── arg parsing ──────────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --worktree)  WORKTREE="$2";  shift 2 ;;
-    --commit)    COMMIT="$2";    shift 2 ;;
-    --files)     FILE_LIST="$2"; shift 2 ;;
-    --dry-run)   DRY_RUN=true;   shift   ;;
+    --worktree)     WORKTREE="$2";              shift 2 ;;
+    --commit)       COMMIT="$2";                shift 2 ;;
+    --files)        FILE_LIST="$2";             shift 2 ;;
+    --db-password)  DB_PASSWORD_CREDENTIAL="$2"; shift 2 ;;
+    --dry-run)      DRY_RUN=true;               shift   ;;
     -h|--help)
       grep '^#' "$0" | head -30
       exit 0 ;;
     *) echo "ERROR: unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+# ── validate credential ──────────────────────────────────────────────────────
+if [[ -z "${DB_PASSWORD_CREDENTIAL}" ]]; then
+  echo "[deploy] ERROR: DB_PASSWORD_CREDENTIAL is required (set via env or --db-password)" >&2
+  exit 2
+fi
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 now_utc() { date -u +%Y%m%dT%H%M%SZ; }
@@ -226,80 +239,67 @@ tar -czf "$BACKUP_DIR/config-archive.tgz" \
   2>/dev/null || true
 echo "[tower] Config archive created"
 
-# 2c. DB dump — use the mysql container with host networking
-#     The autoedit MySQL user works from 192.168.50.50 (host network).
-#     Extract password from the running container env (never print it).
-DB_PASS=$(docker inspect "${CONTAINER_NAME}" \
-  --format '{{range .Config.Env}}{{println .}}{{end}}' \
-  | grep '^DB_PASSWORD=' | head -1 | cut -d= -f2-)
+# 2c. DB dump — use docker exec into the running mysql container (socket auth,
+#     no TCP hop, avoids 172.17.0.1 host-resolution issues).
+#     Does NOT extract or print the password at all — docker exec inherits
+#     MYSQL_PWD in-process, never in argv.
+MYSQL_CONT="mysql"
+echo "[tower] Dumping database via socket (docker exec ${MYSQL_CONT})..."
 
-if [[ -z "$DB_PASS" ]]; then
-  echo "[tower] ERROR: could not extract DB_PASSWORD from container env"
-  echo "RESULT:backup_failed:no_db_password"
-  exit 3
-fi
+DUMP_FILE="${BACKUP_DIR}/autoedit-db.sql"
+DUMP_GZ="${DUMP_FILE}.gz"
 
-echo "[tower] Dumping database..."
-
-# The autoedit DB user has limited privileges. Dump each table individually
-# to avoid RELOAD/FLUSH_TABLES (needed by --single-transaction on MySQL 9).
-# --no-tablespaces avoids PROCESS privilege. --skip-lock-tables avoids LOCK
-# TABLES privilege. We use --skip-add-locks for the same reason.
-DB_DUMP_OK=false
-
-# Strategy 1: simple dump with --single-transaction (works if user has RELOAD)
-docker run --rm --network host mysql:latest \
-  mysqldump \
-    -h 192.168.50.50 \
-    -u autoedit \
-    -p"$DB_PASS" \
-    autoedit \
-    --single-transaction \
-    --no-tablespaces \
-    --skip-lock-tables \
-    --skip-add-locks \
-    --routines \
-    --triggers \
-    2>"$BACKUP_DIR/db-dump-warnings.txt" \
-  | gzip > "$BACKUP_DIR/autoedit-db.sql.gz" \
-  && DB_DUMP_OK=true \
-  || {
-    echo "[tower] --single-transaction dump failed, trying table-by-table..."
-    # Strategy 2: list tables and dump each one individually (no FLUSH needed)
-    TABLES=$(
-      docker run --rm --network host mysql:latest \
-        mysql -h 192.168.50.50 -u autoedit -p"$DB_PASS" autoedit \
-          -N -B -e "SHOW TABLES;" 2>/dev/null
-    ) || true
-
-    if [[ -n "$TABLES" ]]; then
-      echo "[tower] Found tables: $(echo "$TABLES" | tr '\n' ' ')"
-      # Dump schema + data per table
-      : > "$BACKUP_DIR/autoedit-db.sql"
-      echo "-- AUTOEDIT DB dump (table-by-table) $(date -u)" >> "$BACKUP_DIR/autoedit-db.sql"
+# Run the entire dump sequence inside the mysql container so it hits the
+# local Unix socket.  --no-tablespaces, --skip-lock-tables, --skip-add-locks
+# keep the lowest possible privilege footprint on MySQL 9.
+docker exec -e MYSQL_PWD="__DB_PASSWORD_CREDENTIAL__" "${MYSQL_CONT}" \
+  sh -c '
+    set -e
+    mysqldump -u autoedit --socket=/var/run/mysqld/mysqld.sock \
+      autoedit \
+      --single-transaction \
+      --no-tablespaces \
+      --skip-lock-tables \
+      --skip-add-locks \
+      --routines \
+      --triggers \
+      2>/tmp/dump-err.txt \
+    | gzip > /tmp/autoedit-db.sql.gz
+    if [ -s /tmp/autoedit-db.sql.gz ]; then
+      exit 0
+    fi
+    # Fallback: table-by-table for limited-privilege users
+    echo "[tower] single-transaction dump failed, trying table-by-table..."
+    TABLES=$(mysql -u autoedit --socket=/var/run/mysqld/mysqld.sock \
+      autoedit -N -B -e "SHOW TABLES;" 2>/dev/null) || true
+    if [ -n "$TABLES" ]; then
+      echo "[tower] Found tables: $(echo "$TABLES" | tr \"\\n\" \" \")"
+      echo "-- AUTOEDIT DB dump (table-by-table) $(date -u)" > /tmp/autoedit-db.sql
       for tbl in $TABLES; do
         echo "[tower]   dumping: $tbl"
-        docker run --rm --network host mysql:latest \
-          mysqldump \
-            -h 192.168.50.50 -u autoedit -p"$DB_PASS" \
-            autoedit "$tbl" \
-            --no-tablespaces --skip-lock-tables --skip-add-locks \
-            2>/dev/null \
-          >> "$BACKUP_DIR/autoedit-db.sql" || true
+        mysqldump -u autoedit --socket=/var/run/mysqld/mysqld.sock \
+          autoedit "$tbl" \
+          --no-tablespaces --skip-lock-tables --skip-add-locks \
+          2>/dev/null >> /tmp/autoedit-db.sql || true
       done
-      gzip -f "$BACKUP_DIR/autoedit-db.sql"
-      DB_DUMP_OK=true
+      gzip -f /tmp/autoedit-db.sql
+      exit 0
     fi
-  }
+    exit 1
+  ' && DB_DUMP_OK=true || DB_DUMP_OK=false
 
 if [[ "$DB_DUMP_OK" != "true" ]]; then
-  echo "[tower] ERROR: DB dump failed"
-  cat "$BACKUP_DIR/db-dump-warnings.txt" 2>/dev/null | tail -5
+  echo "[tower] ERROR: DB dump failed inside mysql container"
+  cat "${BACKUP_DIR}/db-dump-warnings.txt" 2>/dev/null | tail -5
   echo "RESULT:backup_failed:db_dump"
   exit 3
 fi
 
-DUMP_SIZE=$(stat -c%s "$BACKUP_DIR/autoedit-db.sql.gz" 2>/dev/null || echo "0")
+# Copy the dump out of the container and into the backup dir
+docker cp "${MYSQL_CONT}:/tmp/autoedit-db.sql.gz" "${DUMP_GZ}"
+docker exec "${MYSQL_CONT}" rm -f /tmp/autoedit-db.sql.gz /tmp/dump-err.txt
+
+DUMP_SIZE=$(stat -c%s "${DUMP_GZ}" 2>/dev/null || echo "0")
 echo "[tower] DB dump: ${DUMP_SIZE} bytes (compressed)"
 if [[ "$DUMP_SIZE" -lt 100 ]]; then
   echo "[tower] ERROR: DB dump suspiciously small"
@@ -449,6 +449,7 @@ sed -i \
   -e "s|__COMMIT__|${COMMIT}|g" \
   -e "s|__DRY_RUN__|${DRY_RUN}|g" \
   -e "s|__TARBALL_REMOTE__|${TARBALL_REMOTE}|g" \
+  -e "s|__DB_PASSWORD_CREDENTIAL__|${DB_PASSWORD_CREDENTIAL}|g" \
   "$REMOTE_SCRIPT"
 
 echo ""
