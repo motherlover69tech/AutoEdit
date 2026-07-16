@@ -66,9 +66,11 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── validate credential ──────────────────────────────────────────────────────
+# Can come from: env DB_PASSWORD_CREDENTIAL, --db-password flag, or
+# the Tower-side credential file /mnt/user/appdata/autoedit/.db-credential.
+# The remote script handles the Tower-file fallback at runtime.
 if [[ -z "${DB_PASSWORD_CREDENTIAL}" ]]; then
-  echo "[deploy] ERROR: DB_PASSWORD_CREDENTIAL is required (set via env or --db-password)" >&2
-  exit 2
+  echo "[deploy] DB_PASSWORD_CREDENTIAL not set — remote script will try Tower credential file" >&2
 fi
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -193,6 +195,20 @@ COMMIT="__COMMIT__"
 DRY_RUN="__DRY_RUN__"
 TARBALL_REMOTE="__TARBALL_REMOTE__"
 
+# Resolve DB credential: injected value takes priority, then Tower file
+DB_PASSWORD_CREDENTIAL="__DB_PASSWORD_CREDENTIAL__"
+if [[ -z "${DB_PASSWORD_CREDENTIAL}" ]]; then
+  CRED_FILE="/mnt/user/appdata/autoedit/.db-credential"
+  if [[ -f "$CRED_FILE" ]]; then
+    DB_PASSWORD_CREDENTIAL=$(cat "$CRED_FILE")
+    echo "[tower] Using DB credential from ${CRED_FILE}"
+  else
+    echo "[tower] ERROR: no DB_PASSWORD_CREDENTIAL and no ${CRED_FILE}"
+    echo "RESULT:backup_failed:no_db_password"
+    exit 3
+  fi
+fi
+
 cd "$DEPLOY_DIR"
 
 echo "[tower] === AUTOEDIT remote deploy ==="
@@ -253,7 +269,7 @@ DUMP_GZ="${DUMP_FILE}.gz"
 # local Unix socket.  --no-tablespaces, --skip-lock-tables, --skip-add-locks
 # keep the lowest possible privilege footprint on MySQL 9.
 # Autoedit user lacks RELOAD, so we go straight to table-by-table dump.
-docker exec -e MYSQL_PWD="__DB_PASSWORD_CREDENTIAL__" "${MYSQL_CONT}" \
+docker exec -e MYSQL_PWD="${DB_PASSWORD_CREDENTIAL}" "${MYSQL_CONT}" \
   sh -c '
     set -e
     TABLES=$(mysql -u autoedit --socket=/var/run/mysqld/mysqld.sock \
