@@ -81,6 +81,25 @@ from autoedit.uploads import get_upload_status as get_upload_status_record
 from autoedit.uploads import write_chunk as write_upload_chunk
 
 
+def _valid_gate_one_acceptance(record: object, current_version: str) -> bool:
+    """Validate the redacted, version-bound Gate-1 acceptance record."""
+    if not isinstance(record, dict) or record.get("status") != "PASS":
+        return False
+    if record.get("artifact_version") != current_version:
+        return False
+    words = record.get("words")
+    boundaries = record.get("boundaries")
+    if not isinstance(words, list) or len(words) != 3:
+        return False
+    if not isinstance(boundaries, list) or len(boundaries) != 6:
+        return False
+    if not all(isinstance(item, dict) and item.get("status") == "PASS" for item in words):
+        return False
+    if not all(isinstance(item, dict) and item.get("status") == "PASS" for item in boundaries):
+        return False
+    return record.get("peter_acceptance") is True
+
+
 class ProjectCreate(BaseModel):
     model_config = ConfigDict(strict=True)
 
@@ -2789,7 +2808,7 @@ def create_app(
                     status_code=409,
                     detail="Gate 1 word-timing acceptance is required before generating the AI cut",
                 ) from exc
-            if gate_one.get("status") != "PASS" or gate_one.get("artifact_version") != current_version:
+            if not _valid_gate_one_acceptance(gate_one, current_version):
                 raise HTTPException(
                     status_code=409,
                     detail="Gate 1 word-timing acceptance is required for the current AI artifact",
@@ -2816,7 +2835,8 @@ def create_app(
                 {"start_ms": int(turn["start_ms"]), "end_ms": int(turn["end_ms"]),
                  "speaker_id": next((item["speaker_id"] for item in confirmations.values()
                                       if item["diarizer_speaker_id"] == turn["diarizer_speaker_id"]), None),
-                 "confidence": turn.get("confidence")}
+                 "confidence": turn.get("confidence"), "mapping_status": "confirmed",
+                 "provenance": turn.get("provenance")}
                 for turn in ai_artifact.get("speaker_turns", [])
                 if turn.get("provenance") in {"confirmed_mapping", "prior_confirmed_mapping"}
             ]

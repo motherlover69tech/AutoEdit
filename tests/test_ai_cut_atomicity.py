@@ -11,12 +11,14 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from autoedit.ai.contracts import AIResultArtifact
+from autoedit.ai.activity_from_turns import ArtifactImportError, import_artifact
 from autoedit.api import create_app
 from autoedit.db.migrate import run_migrations
 from autoedit.db.schema import angles, audio_channels, cuts
@@ -108,7 +110,12 @@ def _build_confirmed_ai_project(tmp_path: Path):
 
     # Gate 1 word-timing acceptance recorded as PASS for this version.
     (project_dir / "audio" / "ai" / "v1" / "word-timing-review.json").write_text(
-        json.dumps({"status": "PASS", "artifact_version": "run-one"})
+        json.dumps({
+            "status": "PASS", "artifact_version": "run-one",
+            "words": [{"status": "PASS"}] * 3,
+            "boundaries": [{"status": "PASS"}] * 6,
+            "peter_acceptance": True,
+        })
     )
 
     # The /cut route requires the VAD baseline activity.json to exist.
@@ -171,3 +178,30 @@ def test_ai_cut_persists_all_sides_on_success(tmp_path: Path):
         rows = session.execute(cuts.select().where(cuts.c.project_id == pid)).all()
     assert len(rows) == 1, "exactly one cut row must be persisted"
     assert rows[0]._mapping["kind"] == "ai"
+
+
+def test_confirmed_solo_projection_selects_mapped_close_camera(tmp_path: Path):
+    _engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    response = client.post(f"/projects/{pid}/cut", json={})
+    assert response.status_code == 200, response.text
+    clips = response.json()["clips"]
+    assert clips[0]["angle_id"] != "wide"
+    assert clips[0]["reason_code"] == "speaking"
+
+
+def test_gate_one_two_field_flag_cannot_authorize_ai_cut(tmp_path: Path):
+    _engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    gate_path = tmp_path / pid / "audio" / "ai" / "v1" / "word-timing-review.json"
+    gate_path.write_text(json.dumps({"status": "PASS", "artifact_version": "run-one"}))
+    response = client.post(f"/projects/{pid}/cut", json={})
+    assert response.status_code == 409
+    assert "Gate 1" in response.json()["detail"]
+
+
+def test_valid_nonempty_artifact_without_source_verification_fails_closed(tmp_path: Path):
+    _engine, _client, pid = _build_confirmed_ai_project(tmp_path)
+    artifact = json.loads(
+        (tmp_path / pid / "audio" / "ai" / "v1" / "result.json").read_text()
+    )
+    with pytest.raises(ArtifactImportError, match="source-bound"):
+        import_artifact(artifact)
