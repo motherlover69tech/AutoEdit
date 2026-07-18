@@ -479,8 +479,8 @@ echo "$DEPLOY_OUTPUT"
 rm -f "$TARBALL" "$REMOTE_SCRIPT"
 
 # ── parse result ────────────────────────────────────────────────────────────
-# Extract the RESULT lines from the remote output
-RESULT_LINE=$(echo "$DEPLOY_OUTPUT" | grep '^RESULT:' | tail -1 || true)
+# Extract the verdict from the remote output (first RESULT: line without =)
+RESULT_LINE=$(echo "$DEPLOY_OUTPUT" | grep '^RESULT:' | grep -v '=' | head -1 || true)
 RESULT_VALUE="${RESULT_LINE#RESULT:}"
 
 # Also check exit code from ssh_tower

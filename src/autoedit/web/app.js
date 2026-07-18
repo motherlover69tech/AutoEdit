@@ -281,7 +281,8 @@ async function probeAngle(angleId) {
     }
   }
   renderChannelMapping();
-}
+  loadSpeakerConfirmations();
+  }
 
 async function loadAssets(rerender = true) {
   if (!state.activeProject) return;
@@ -294,6 +295,7 @@ async function loadAssets(rerender = true) {
   } else {
     renderUploadGrid();
   }
+  loadSpeakerConfirmations();
 }
 
 function renderChannelMapping() {
@@ -385,7 +387,38 @@ async function saveChannelMapping() {
   if (startBtn) startBtn.style.display = 'inline-block';
 }
 
-// ── Processing pipeline ──────────────────────────────────────────
+async function loadSpeakerConfirmations() {
+  const target = qs('speakerConfirmation');
+  if (!target || !state.activeProject) return;
+  try {
+    const data = await api(`/projects/${state.activeProject.id}/speaker-confirmations`);
+    if (!data.labels.length) { target.innerHTML = '<p class="mono-note">No anonymous turns are available.</p>'; return; }
+    target.innerHTML = data.labels.map((item) => {
+      const confirmation = item.confirmation || {};
+      const options = data.speakers.map((speaker) => `<option value="${escapeHtml(speaker)}" ${confirmation.speaker_id === speaker ? 'selected' : ''}>${escapeHtml(speaker)}</option>`).join('');
+      const cameras = data.cameras.map((camera) => `<option value="${escapeHtml(camera.id)}" ${confirmation.camera_id === camera.id ? 'selected' : ''}>${escapeHtml(camera.label)} (${escapeHtml(camera.role)})</option>`).join('');
+      const snippetsHtml = item.snippets.map((clip) => `<div class="confirmation-snippet"><audio controls preload="none" src="${escapeHtml(clip.url)}" aria-label="Program audio snippet ${escapeHtml(clip.start_ms)} to ${escapeHtml(clip.end_ms)} milliseconds"></audio><span class="mono-note">${escapeHtml(clip.start_ms)}–${escapeHtml(clip.end_ms)} ms</span></div>`).join('');
+      return `<fieldset class="confirmation-row" data-confirm-label="${escapeHtml(item.diarizer_speaker_id)}"><legend><b>${escapeHtml(item.diarizer_speaker_id)}</b> <span class="badge ${item.status === 'confirmed' ? 'ok' : item.status === 'stale' ? 'warn' : 'neutral'}">${escapeHtml(item.status)}</span></legend><p class="mono-note">${item.status === 'stale' ? 'This mapping is stale for the current AI run.' : 'Confirm who this voice belongs to. This does not change sync.'}</p><div class="confirmation-snippets">${snippetsHtml || '<span class="mono-note">No bounded snippets available; confirmation is disabled.</span>'}</div><label class="field">Existing speaker<select data-confirm-speaker><option value="">Choose a speaker…</option>${options}</select></label><label class="field">Close camera<select data-confirm-camera><option value="">Choose a camera…</option>${cameras}</select></label><button class="btn btn-primary btn-sm" type="button" data-confirm-save ${item.status === 'confirmed' && item.confirmation ? '' : 'disabled'}>Save confirmed mapping</button></fieldset>`;
+    }).join('');
+    target.querySelectorAll('[data-confirm-label]').forEach((row) => {
+      const speaker = row.querySelector('[data-confirm-speaker]');
+      const camera = row.querySelector('[data-confirm-camera]');
+      const button = row.querySelector('[data-confirm-save]');
+      const refresh = () => { button.disabled = !speaker.value || !camera.value || row.querySelectorAll('audio').length < 2; };
+      speaker.addEventListener('change', refresh); camera.addEventListener('change', refresh); refresh();
+      button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+          const label = row.dataset.confirmLabel;
+          const item = data.labels.find((candidate) => candidate.diarizer_speaker_id === label);
+          await api(`/projects/${state.activeProject.id}/speaker-confirmations`, { method: 'PUT', body: JSON.stringify({ diarizer_speaker_id: label, speaker_id: speaker.value, camera_id: camera.value, source_run_id: data.run_id, source_artifact_version: data.artifact_version, evidence_turn_ids: item.snippets.map((snippet) => snippet.turn_id), expected_version: item.confirmation?.version || null }) });
+          setStatus(`Confirmed ${label}.`, 'ok'); await loadSpeakerConfirmations();
+        } catch (err) { setStatus(`Confirmation failed: ${err.message}`, ''); refresh(); }
+      });
+    });
+  } catch (err) { target.innerHTML = `<p class="mono-note">Speaker confirmation unavailable: ${escapeHtml(err.message)}</p>`; }
+}
+
 
 let progressInterval = null;
 const STAGE_BADGES = {

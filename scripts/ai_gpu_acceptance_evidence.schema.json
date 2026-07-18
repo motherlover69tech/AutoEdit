@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Redacted AI-GPU-1 acceptance evidence",
+  "type": "object",
+  "required": ["samples", "phase_markers", "health", "outputs", "cleanup", "backends"],
+  "additionalProperties": true,
+  "properties": {
+    "samples": {"type": "array", "minItems": 2, "items": {"type": "object", "required": ["timestamp_ms", "total_mib", "used_mib", "phase"], "properties": {"timestamp_ms": {"type": "integer", "minimum": 0}, "total_mib": {"type": "integer", "minimum": 1}, "used_mib": {"type": "integer", "minimum": 0}, "phase": {"type": "string"}, "processes": {"type": "array"}}}},
+    "phase_markers": {"type": "object"},
+    "health": {"type": "object"},
+    "outputs": {"type": "object"},
+    "cleanup": {"type": "object"},
+    "backends": {"type": "object"}
+  }
+}

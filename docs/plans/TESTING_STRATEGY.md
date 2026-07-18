@@ -1,22 +1,23 @@
 # AUTOEDIT Testing Strategy
 
-## Current verification checkpoint — 2026-07-14 reconciliation
+## Current verification checkpoint — 2026-07-16 post-deploy audit
 
-- Full mock-backed suite: `685 passed, 2 skipped`.
-- Focused cut/player suite: `60 passed, 1 skipped`.
+- Deterministic full suite: `OLLAMA_BASE_URL='' LLM_MODEL='' env -u VIRTUAL_ENV uv run pytest -q -rs` → `691 passed, 1 skipped in 18.16s`; the sole skip is `tests/test_mysql_integration.py` because central-DB credentials were not supplied.
+- Focused cut/player command `pytest tests/test_cut_engine.py tests/test_player_state.py tests/test_angle_switching.py -q -rs`: `57 passed`.
 - Python compile and `git diff --check`: passed.
-- The local pytest wrapper skipped its JS module test because Node is not installed in the workspace. The same `tests/player_logic.test.mjs` was then executed in `node:22-alpine` on Unraid and passed: `All player logic + timeline + LUT + angle-LUT tests passed`.
+- Node 22.22.3 is now installed locally. `node --check` on `app.js`/`player.js` and direct `node tests/player_logic.test.mjs` passed with `All player logic + timeline + LUT + angle-LUT tests passed`; the pytest wrapper therefore runs rather than skips the JS module test.
 - New CDL reason metadata preserves visual timing while exposing same-camera editorial boundaries: speaking, crosstalk/hold, interjection hold, rapid exchange, silence, variety wide, source fallback, and future unresolved/low-confidence states.
 - Live HTTPS verification passed: login `204`, projects `200`, player `200`, player-state `200`, and the player HTML contained `shotReason`. The existing project had 56 legacy-reason clips and zero structured clips; all are supported by the player fallback. Production remained `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock`.
 - Review-fix deployment verification: 100 ms silence and short-crosstalk inputs both survived canonical 25 fps snapping as distinct 80 ms reason segments in the live container. Local and deployed `cut_engine.py` hashes matched. Production image `sha256:48e1a370d1c171d96baf25ac2de47e5438bb097aa97a76889ebfb9703b1b606e` stayed running with zero restarts.
 - Final independent re-review: `PASS`, with no remaining shot-reason correctness or persistence findings.
+- Deployment card `t_26cf76c6` records exact non-`master` candidate `c096e4e` as `DEPLOYED_AND_VERIFIED`; fresh public checks returned health 200 and unauthenticated projects 401. Local `master` does not contain that commit, so every post-deploy browser card must pin the exact candidate worktree/commit.
 
 This plan expands Appendix D of the source spec. Every implementation stage must add or update tests here as the project structure becomes concrete.
 
 ## Current verification checkpoint
 
 - Active AI job: unresolved Phase 4/acceptance work in `docs/plans/ai-gpu-1-corrective-pickup.md`.
-- Final local reconciliation checkpoint: `685 passed, 2 skipped`; delayed-review worker/artifact/transcript hardening checkpoint: `142 passed`.
+- Final local reconciliation checkpoint: `691 passed, 1 skipped`; delayed-review worker/artifact/transcript hardening checkpoint: `142 passed`.
 - Artifact confinement/strictness/immutability and speaker-mapping corrections received independent `PASS` reviews and have direct regressions.
 - Remote V100 `/ready`, queued real ASR/alignment, and constrained two-speaker diarization succeeded. These prove transport/structure, not frame-level timing, stable speaker identity, editorial cut quality, or production acceptance.
 - Compilation and `git diff --check` remain mandatory after every reconciliation/code change.
@@ -65,12 +66,22 @@ Automated tests added with the notes implementation:
 
 - `tests/test_notes.py` (17 tests) — create, list, delete, auth, author from session, invalid kind, negative t_ms, oversized body, XSS preservation (body stored as-is; rendering uses textContent), timeline-state note inclusion, empty notes.
 
-Manual checks required before Stage 7.4 can be marked `done`:
+Acceptance checks required before Stage 7.4 can be marked `done`:
 
 - Two different reviewers' notes appear with correct authors and times.
 - Clicking a note marker on the timeline seeks to the correct timestamp.
 - Injected `<script>` in a note body renders as text, not executed.
 - Delete removes the note from both the list panel and timeline lane.
+
+Post-deploy audit note: local Tester artifact `tests/browser/stage_7_4_notes.spec.cjs` exercises these four behaviors in Chromium. Unmodified, it serves local `master` and reproduces a stale delete-marker defect. A strict Designer audit pointed it at exact deployed `c096e4e`, served candidate CSS and audio/LUT fixtures, and returned `STAGE_7_4_XSS_GATE_PASS` with zero console/page errors; the post-delete screenshot shows one remaining note and one Notes-lane marker. Stage 7.4 remains `in_progress` until an independent Tester repeats that exact-candidate run.
+
+## Current test organization
+
+- Pytest discovers 50 `tests/test_*.py` modules under the configured `testpaths = ["tests"]`.
+- `tests/test_player_logic_js.py` is the pytest bridge to `tests/player_logic.test.mjs`; it runs with local Node and skips cleanly only when Node is unavailable.
+- Browser acceptance scripts under `tests/browser/` are explicit Node/Playwright commands and are not collected by pytest. They must state the exact source worktree/commit they serve.
+- `tests/fixtures/ffprobe/` contains committed metadata fixtures. Consent-controlled real media and derived artifacts remain outside Git.
+- No `tests/integration/test_whisperx_golden_media.py` or end-to-end media smoke script exists yet; those commands remain planned acceptance gates, not runnable coverage claims.
 
 ## Stage 7.2 required test additions
 
@@ -141,7 +152,7 @@ Use for pure or mostly-pure logic:
 - FCPXML rational-time formatting.
 - VAD interval merge/drop logic.
 
-Expected command once code exists: record exact test command here, e.g. `pytest` or `npm test`.
+Current command: `OLLAMA_BASE_URL='' LLM_MODEL='' env -u VIRTUAL_ENV uv run pytest -q -rs`.
 
 ### 2. Contract tests
 
@@ -189,7 +200,7 @@ Golden tests should cover:
 
 ### 4. Integration smoke test
 
-Once the backend exists, maintain a scripted smoke path:
+The backend exists, but a committed end-to-end media smoke script does not yet. The intended path remains:
 
 1. Start test stack.
 2. Run migrations.
@@ -203,7 +214,7 @@ Once the backend exists, maintain a scripted smoke path:
 10. Export FCPXML.
 11. Validate XML and expected references.
 
-Expected command should eventually be documented here, e.g.:
+Planned command (not currently present):
 
 ```bash
 ./scripts/smoke-test.sh
@@ -237,11 +248,13 @@ Some gates are explicitly manual and must be recorded in stage notes:
 
 ## Test command
 
-Current local command:
+Current deterministic local command:
 
 ```bash
-env -u VIRTUAL_ENV uv run pytest -q
+OLLAMA_BASE_URL='' LLM_MODEL='' env -u VIRTUAL_ENV uv run pytest -q -rs
 ```
+
+Current result: `691 passed, 1 skipped`; the central-MySQL integration test is the only skip when DB credentials are absent. The counts below are retained as historical stage checkpoints, not current totals.
 
 Latest local result without MySQL URL: `17 passed, 1 skipped`.
 
@@ -283,7 +296,7 @@ Latest local result after Stage 6.3 sub-edit generation: `248 passed, 1 skipped`
 
 Latest local result after internal review hardening: `257 passed, 1 skipped`; `python -m compileall -q src tests` passes.
 
-Latest current verification after Direct auto-cut/player-state updates: focused `env -u VIRTUAL_ENV uv run pytest tests/test_cut_engine.py tests/test_player_state.py -q` → `39 passed`; full suite `env -u VIRTUAL_ENV uv run pytest -q` → `438 passed, 2 skipped`; `python -m compileall -q src tests` passes; `git diff --check` passes.
+Historical verification after the Direct auto-cut/player-state updates: focused `env -u VIRTUAL_ENV uv run pytest tests/test_cut_engine.py tests/test_player_state.py -q` → `39 passed`; the then-current full suite was `438 passed, 2 skipped`; compile and diff checks passed. The authoritative current count is the checkpoint at the top of this file.
 
 Stage 7.1 tests added:
 

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, inspect
 
-from autoedit.db.schema import metadata
+from autoedit.db.schema import metadata, speaker_confirmations
 
 
 def run_migrations(engine: Engine) -> None:
@@ -14,3 +14,5 @@ def run_migrations(engine: Engine) -> None:
     preserving this public function for tests/deploy scripts.
     """
     metadata.create_all(engine)
+    if "speaker_confirmations" not in inspect(engine).get_table_names():
+        speaker_confirmations.create(engine)

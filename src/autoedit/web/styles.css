@@ -150,6 +150,14 @@ textarea:focus { outline: none; border-color: var(--red); }
 .channel-table input[list] { min-width: 160px; }
 .channel-table .mono-note { display: inline-block; max-width: 280px; }
 
+.confirmation-row { margin-top: 16px; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
+.confirmation-row legend { padding: 0 8px; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; }
+.confirmation-snippets { display: grid; gap: 8px; margin: 12px 0 16px; }
+.confirmation-snippet { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.confirmation-snippet audio { max-width: 100%; height: 32px; }
+.confirmation-row .field { max-width: 420px; }
+@media (max-width: 840px) { .confirmation-row { display: grid; } .confirmation-snippet audio { width: 100%; } }
+
 /* ── Status line ──────────────────────────────────────── */
 .status-line { padding: 12px var(--pad); font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--line); }
 .status-line.ok { color: var(--ok); }

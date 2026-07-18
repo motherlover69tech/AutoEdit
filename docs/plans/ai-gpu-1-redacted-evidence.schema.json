@@ -1,0 +1,1493 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://autoedit.local/schemas/ai-gpu-1-redacted-evidence-1.0.0.json",
+  "title": "AUTOEDIT AI-GPU-1 redacted acceptance evidence",
+  "description": "Canonical redacted audit contract for OPS-AIGPU1-001..008, SEC-AIGPU1-002/003, and TEST-AIGPU1-005/007/008. Semantic rules in x-autoedit-semantic-rules are mandatory harness validation rules, not documentation-only annotations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evidence_class",
+    "run",
+    "authorization",
+    "redaction",
+    "candidate",
+    "project_context",
+    "discovery",
+    "compose",
+    "measurement",
+    "services",
+    "workloads",
+    "cleanup_and_rollback",
+    "commands",
+    "tests",
+    "requirement_results",
+    "overall"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "evidence_class": { "const": "redacted_audit" },
+    "run": { "$ref": "#/$defs/run" },
+    "authorization": { "$ref": "#/$defs/authorization" },
+    "redaction": { "$ref": "#/$defs/redaction" },
+    "candidate": { "$ref": "#/$defs/candidate" },
+    "project_context": { "$ref": "#/$defs/projectContext" },
+    "discovery": { "$ref": "#/$defs/discovery" },
+    "compose": { "$ref": "#/$defs/compose" },
+    "measurement": { "$ref": "#/$defs/measurement" },
+    "services": { "$ref": "#/$defs/services" },
+    "workloads": { "$ref": "#/$defs/workloads" },
+    "cleanup_and_rollback": { "$ref": "#/$defs/cleanupAndRollback" },
+    "commands": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/command" }
+    },
+    "tests": { "$ref": "#/$defs/tests" },
+    "requirement_results": { "$ref": "#/$defs/requirementResults" },
+    "overall": { "$ref": "#/$defs/overall" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "run": {
+            "properties": { "mode": { "const": "live" } },
+            "required": ["mode"]
+          },
+          "overall": {
+            "properties": { "status": { "const": "pass" } },
+            "required": ["status"]
+          }
+        },
+        "required": ["run", "overall"]
+      },
+      "then": {
+        "properties": {
+          "authorization": {
+            "properties": {
+              "status": { "const": "pass" },
+              "explicit_peter_authorization": { "const": true }
+            },
+            "required": ["status", "explicit_peter_authorization", "decision_ref"]
+          },
+          "redaction": {
+            "properties": { "status": { "const": "pass" } },
+            "required": ["status"]
+          },
+          "run": {
+            "properties": {
+              "acceptance_eligible": { "const": true },
+              "exit": {
+                "properties": {
+                  "code": { "const": 0 },
+                  "class": { "const": "success" }
+                },
+                "required": ["code", "class"]
+              }
+            },
+            "required": ["acceptance_eligible", "exit"]
+          },
+          "overall": {
+            "properties": {
+              "acceptance_pass": { "const": true },
+              "failed_requirements": { "maxItems": 0 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "run": {
+            "properties": { "mode": { "enum": ["discovery", "mock"] } },
+            "required": ["mode"]
+          }
+        },
+        "required": ["run"]
+      },
+      "then": {
+        "properties": {
+          "run": {
+            "properties": { "acceptance_eligible": { "const": false } }
+          },
+          "overall": {
+            "properties": { "acceptance_pass": { "const": false } }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "status": {
+      "type": "string",
+      "enum": ["pass", "fail", "skipped", "unavailable", "unauthorized"]
+    },
+    "opaqueId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "safeCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Z0-9][A-Z0-9._:-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "gitCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$"
+    },
+    "utcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "jsonPointer": {
+      "type": "string",
+      "pattern": "^#(?:/|$)",
+      "maxLength": 256
+    },
+    "checkResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "validation_rule_id", "evidence_refs"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "validation_rule_id": { "$ref": "#/$defs/safeCode" },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/jsonPointer" },
+          "uniqueItems": true
+        },
+        "failure_code": {
+          "anyOf": [
+            { "$ref": "#/$defs/safeCode" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "mode",
+        "status",
+        "started_at_utc",
+        "ended_at_utc",
+        "acceptance_eligible",
+        "preparation_or_mock_is_authorization",
+        "exit"
+      ],
+      "properties": {
+        "run_id": { "$ref": "#/$defs/opaqueId" },
+        "mode": { "type": "string", "enum": ["discovery", "mock", "live"] },
+        "status": { "$ref": "#/$defs/status" },
+        "started_at_utc": { "$ref": "#/$defs/utcTimestamp" },
+        "ended_at_utc": { "$ref": "#/$defs/utcTimestamp" },
+        "acceptance_eligible": { "type": "boolean" },
+        "preparation_or_mock_is_authorization": { "const": false },
+        "exit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "class"],
+          "properties": {
+            "code": { "type": "integer", "minimum": 0, "maximum": 255 },
+            "class": {
+              "type": "string",
+              "enum": [
+                "success",
+                "validation_failure",
+                "unavailable",
+                "unauthorized",
+                "adapter_error",
+                "redaction_failure",
+                "cleanup_or_rollback_failure"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "explicit_peter_authorization",
+        "decision_ref",
+        "authorized_window_start_utc",
+        "authorized_window_end_utc",
+        "scope",
+        "preparation_acknowledged_as_non_authorizing"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "explicit_peter_authorization": { "type": "boolean" },
+        "decision_ref": {
+          "anyOf": [
+            { "$ref": "#/$defs/opaqueId" },
+            { "type": "null" }
+          ]
+        },
+        "authorized_window_start_utc": {
+          "anyOf": [
+            { "$ref": "#/$defs/utcTimestamp" },
+            { "type": "null" }
+          ]
+        },
+        "authorized_window_end_utc": {
+          "anyOf": [
+            { "$ref": "#/$defs/utcTimestamp" },
+            { "type": "null" }
+          ]
+        },
+        "scope": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "target_host_ref",
+            "fixture_ref",
+            "start_approved_worker",
+            "load_or_exercise_dots",
+            "unload_ollama",
+            "submit_whisper_jobs",
+            "cleanup_resource_refs"
+          ],
+          "properties": {
+            "target_host_ref": {
+              "anyOf": [
+                { "$ref": "#/$defs/opaqueId" },
+                { "type": "null" }
+              ]
+            },
+            "fixture_ref": {
+              "anyOf": [
+                { "$ref": "#/$defs/opaqueId" },
+                { "type": "null" }
+              ]
+            },
+            "start_approved_worker": { "type": "boolean" },
+            "load_or_exercise_dots": { "type": "boolean" },
+            "unload_ollama": { "type": "boolean" },
+            "submit_whisper_jobs": { "type": "boolean" },
+            "cleanup_resource_refs": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/opaqueId" },
+              "uniqueItems": true
+            }
+          }
+        },
+        "preparation_acknowledged_as_non_authorizing": { "const": true }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "policy_version",
+        "raw_sensitive_payloads_present",
+        "prohibited_categories",
+        "transformations",
+        "secret_source",
+        "scan"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "policy_version": { "const": "AI-GPU-1-REDACTION-1" },
+        "raw_sensitive_payloads_present": { "const": false },
+        "prohibited_categories": {
+          "type": "array",
+          "minItems": 16,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "credentials",
+              "tokens",
+              "cookies",
+              "authorization_headers",
+              "secret_values",
+              "raw_media",
+              "raw_audio",
+              "transcript_text",
+              "dots_input_text",
+              "human_names",
+              "exact_private_paths",
+              "private_media_hashes",
+              "screenshots_or_recordings_with_media",
+              "raw_http_payloads",
+              "raw_environment_dumps",
+              "container_runtime_ids"
+            ]
+          }
+        },
+        "transformations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["category", "action", "replacement"],
+            "properties": {
+              "category": { "$ref": "#/$defs/opaqueId" },
+              "action": {
+                "type": "string",
+                "enum": ["drop", "replace", "aggregate", "opaque_alias"]
+              },
+              "replacement": {
+                "type": "string",
+                "enum": ["none", "REDACTED", "aggregate_only", "run_scoped_alias"]
+              }
+            }
+          }
+        },
+        "secret_source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "source_ref",
+            "approved_source",
+            "values_persisted",
+            "values_in_argv",
+            "values_in_public_errors"
+          ],
+          "properties": {
+            "status": { "$ref": "#/$defs/status" },
+            "source_ref": {
+              "anyOf": [
+                { "$ref": "#/$defs/opaqueId" },
+                { "type": "null" }
+              ]
+            },
+            "approved_source": { "type": "boolean" },
+            "values_persisted": { "const": false },
+            "values_in_argv": { "const": false },
+            "values_in_public_errors": { "const": false }
+          }
+        },
+        "scan": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "scanner_version", "files_scanned", "findings"],
+          "properties": {
+            "status": { "$ref": "#/$defs/status" },
+            "scanner_version": { "$ref": "#/$defs/opaqueId" },
+            "files_scanned": { "type": "integer", "minimum": 1 },
+            "findings": { "type": "integer", "const": 0 }
+          }
+        }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "source_commit",
+        "worker_image_digest",
+        "compose_redacted_render_digest",
+        "worker_runtime",
+        "whisper_configuration",
+        "dots_configuration"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "source_commit": {
+          "anyOf": [
+            { "$ref": "#/$defs/gitCommit" },
+            { "type": "null" }
+          ]
+        },
+        "worker_image_digest": {
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "compose_redacted_render_digest": {
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "worker_runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["python", "cuda", "whisperx", "torch", "pyannote"],
+          "properties": {
+            "python": { "type": ["string", "null"], "maxLength": 64 },
+            "cuda": { "type": ["string", "null"], "maxLength": 64 },
+            "whisperx": { "type": ["string", "null"], "maxLength": 64 },
+            "torch": { "type": ["string", "null"], "maxLength": 64 },
+            "pyannote": { "type": ["string", "null"], "maxLength": 64 }
+          }
+        },
+        "whisper_configuration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "model",
+            "compute_type",
+            "language",
+            "alignment",
+            "batch_size",
+            "diarization",
+            "min_speakers",
+            "max_speakers",
+            "queue_concurrency"
+          ],
+          "properties": {
+            "model": { "const": "large-v3" },
+            "compute_type": { "const": "float16" },
+            "language": { "const": "en" },
+            "alignment": { "const": true },
+            "batch_size": { "const": 4 },
+            "diarization": { "const": true },
+            "min_speakers": { "const": 2 },
+            "max_speakers": { "const": 2 },
+            "queue_concurrency": { "const": 1 }
+          }
+        },
+        "dots_configuration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "quality_config_ref",
+            "input_character_count",
+            "steps",
+            "guidance",
+            "gpu_measurement_excludes_post_processing"
+          ],
+          "properties": {
+            "quality_config_ref": {
+              "anyOf": [
+                { "$ref": "#/$defs/opaqueId" },
+                { "type": "null" }
+              ]
+            },
+            "input_character_count": { "const": 600 },
+            "steps": { "const": 12 },
+            "guidance": { "const": 1.3 },
+            "gpu_measurement_excludes_post_processing": { "const": true }
+          }
+        }
+      }
+    },
+    "projectContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "project_ref",
+        "fixture_ref",
+        "acceptance_run_ref",
+        "fps_num",
+        "fps_den",
+        "automatic_sync_offsets",
+        "input_hash_match",
+        "raw_media_hash_present"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "project_ref": {
+          "anyOf": [
+            { "$ref": "#/$defs/opaqueId" },
+            { "type": "null" }
+          ]
+        },
+        "fixture_ref": {
+          "anyOf": [
+            { "$ref": "#/$defs/opaqueId" },
+            { "type": "null" }
+          ]
+        },
+        "acceptance_run_ref": {
+          "anyOf": [
+            { "$ref": "#/$defs/opaqueId" },
+            { "type": "null" }
+          ]
+        },
+        "fps_num": { "type": ["integer", "null"], "minimum": 1 },
+        "fps_den": { "type": ["integer", "null"], "minimum": 1 },
+        "automatic_sync_offsets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["channel_ref", "sync_offset_ms", "applied_exactly_once"],
+            "properties": {
+              "channel_ref": { "$ref": "#/$defs/opaqueId" },
+              "sync_offset_ms": { "type": "integer" },
+              "applied_exactly_once": { "const": true }
+            }
+          }
+        },
+        "input_hash_match": { "type": ["boolean", "null"] },
+        "raw_media_hash_present": { "const": false }
+      }
+    },
+    "discoveryObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "source_operation_id", "evidence_refs"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "source_operation_id": { "$ref": "#/$defs/opaqueId" },
+        "evidence_refs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/jsonPointer" },
+          "uniqueItems": true
+        },
+        "failure_code": {
+          "anyOf": [
+            { "$ref": "#/$defs/safeCode" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "read_only",
+        "completed_before_live_activity",
+        "implicit_start_or_mutation_attempted",
+        "observations",
+        "gpu_devices",
+        "host_resources",
+        "docker_services",
+        "network_bindings",
+        "volumes",
+        "effective_backends"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "read_only": { "const": true },
+        "completed_before_live_activity": { "type": "boolean" },
+        "implicit_start_or_mutation_attempted": { "const": false },
+        "observations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "gpu_cpu_ram",
+            "docker_compose_topology",
+            "network_ports_reverse_proxy",
+            "volumes_appdata_cache_permissions",
+            "health_restart_readiness",
+            "dots_state",
+            "ollama_state",
+            "production_backends",
+            "persistent_data_backup_rollback"
+          ],
+          "properties": {
+            "gpu_cpu_ram": { "$ref": "#/$defs/discoveryObservation" },
+            "docker_compose_topology": { "$ref": "#/$defs/discoveryObservation" },
+            "network_ports_reverse_proxy": { "$ref": "#/$defs/discoveryObservation" },
+            "volumes_appdata_cache_permissions": { "$ref": "#/$defs/discoveryObservation" },
+            "health_restart_readiness": { "$ref": "#/$defs/discoveryObservation" },
+            "dots_state": { "$ref": "#/$defs/discoveryObservation" },
+            "ollama_state": { "$ref": "#/$defs/discoveryObservation" },
+            "production_backends": { "$ref": "#/$defs/discoveryObservation" },
+            "persistent_data_backup_rollback": { "$ref": "#/$defs/discoveryObservation" }
+          }
+        },
+        "gpu_devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["device_ref", "product_name", "total_mib", "compute_capability"],
+            "properties": {
+              "device_ref": { "$ref": "#/$defs/opaqueId" },
+              "product_name": { "type": "string", "maxLength": 80 },
+              "total_mib": { "type": "integer", "minimum": 1 },
+              "compute_capability": { "type": "string", "maxLength": 16 }
+            }
+          }
+        },
+        "host_resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["logical_cpu_count", "ram_total_mib", "ram_available_mib"],
+          "properties": {
+            "logical_cpu_count": { "type": ["integer", "null"], "minimum": 1 },
+            "ram_total_mib": { "type": ["integer", "null"], "minimum": 1 },
+            "ram_available_mib": { "type": ["integer", "null"], "minimum": 0 }
+          }
+        },
+        "docker_services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["service_ref", "role", "state", "health", "restart_count"],
+            "properties": {
+              "service_ref": { "$ref": "#/$defs/opaqueId" },
+              "role": {
+                "type": "string",
+                "enum": ["autoedit_app", "whisper_worker", "dots", "ollama", "reverse_proxy", "central_mysql", "other_approved"]
+              },
+              "state": { "type": "string", "enum": ["running", "stopped", "absent", "unknown"] },
+              "health": { "type": "string", "enum": ["healthy", "unhealthy", "starting", "none", "unknown"] },
+              "restart_count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "network_bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["service_ref", "binding_class", "port", "expected"],
+            "properties": {
+              "service_ref": { "$ref": "#/$defs/opaqueId" },
+              "binding_class": { "type": "string", "enum": ["loopback", "host_network", "lan", "public", "none"] },
+              "port": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535 },
+              "expected": { "type": "boolean" }
+            }
+          }
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["service_ref", "purpose", "access", "persistent", "permission_status"],
+            "properties": {
+              "service_ref": { "$ref": "#/$defs/opaqueId" },
+              "purpose": { "type": "string", "enum": ["media", "model_cache", "appdata", "evidence", "other"] },
+              "access": { "type": "string", "enum": ["read_only", "read_write", "none"] },
+              "persistent": { "type": "boolean" },
+              "permission_status": { "$ref": "#/$defs/status" }
+            }
+          }
+        },
+        "effective_backends": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["whisper", "diarize"],
+          "properties": {
+            "whisper": { "type": ["string", "null"], "enum": ["mock", null] },
+            "diarize": { "type": ["string", "null"], "enum": ["mock", null] }
+          }
+        }
+      }
+    },
+    "compose": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "render_only",
+        "container_start_attempted",
+        "redacted_render_digest",
+        "app_host_network",
+        "worker_loopback_only",
+        "worker_reachable_from_lan_or_npm",
+        "media_mount_read_only",
+        "media_path_confined",
+        "model_cache_persistent",
+        "readiness_healthcheck_present",
+        "queue_concurrency",
+        "app_backends"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "render_only": { "const": true },
+        "container_start_attempted": { "const": false },
+        "redacted_render_digest": {
+          "anyOf": [
+            { "$ref": "#/$defs/sha256" },
+            { "type": "null" }
+          ]
+        },
+        "app_host_network": { "type": ["boolean", "null"] },
+        "worker_loopback_only": { "type": ["boolean", "null"] },
+        "worker_reachable_from_lan_or_npm": { "type": ["boolean", "null"] },
+        "media_mount_read_only": { "type": ["boolean", "null"] },
+        "media_path_confined": { "type": ["boolean", "null"] },
+        "model_cache_persistent": { "type": ["boolean", "null"] },
+        "readiness_healthcheck_present": { "type": ["boolean", "null"] },
+        "queue_concurrency": { "type": ["integer", "null"], "minimum": 1 },
+        "app_backends": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["whisper", "diarize"],
+          "properties": {
+            "whisper": { "type": ["string", "null"], "enum": ["mock", null] },
+            "diarize": { "type": ["string", "null"], "enum": ["mock", null] }
+          }
+        }
+      }
+    },
+    "phaseMarker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "sequence",
+        "start_monotonic_ns",
+        "end_monotonic_ns",
+        "start_wall_utc",
+        "end_wall_utc",
+        "duration_ms",
+        "start_event",
+        "end_event"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "sequence": { "type": "integer", "minimum": 0, "maximum": 7 },
+        "start_monotonic_ns": { "type": "integer", "minimum": 0 },
+        "end_monotonic_ns": { "type": "integer", "minimum": 1 },
+        "start_wall_utc": { "$ref": "#/$defs/utcTimestamp" },
+        "end_wall_utc": { "$ref": "#/$defs/utcTimestamp" },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "start_event": { "$ref": "#/$defs/safeCode" },
+        "end_event": { "$ref": "#/$defs/safeCode" }
+      }
+    },
+    "processSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pid", "name", "role", "used_mib", "attribution_status"],
+      "properties": {
+        "pid": { "type": "integer", "minimum": 1 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:+-]+$" },
+        "role": { "type": "string", "enum": ["whisper_worker", "dots", "ollama", "display_driver", "other_approved", "unknown"] },
+        "used_mib": { "type": "integer", "minimum": 0 },
+        "attribution_status": { "type": "string", "enum": ["approved", "unknown"] }
+      }
+    },
+    "serviceAtSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service_ref", "health", "readiness", "restart_count"],
+      "properties": {
+        "service_ref": { "$ref": "#/$defs/opaqueId" },
+        "health": { "type": "string", "enum": ["healthy", "unhealthy", "starting", "not_applicable", "unknown"] },
+        "readiness": { "type": "string", "enum": ["ready", "not_ready", "not_applicable", "unknown"] },
+        "restart_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "gpuSample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "scheduled_monotonic_ns",
+        "observed_monotonic_ns",
+        "wall_utc",
+        "phase",
+        "activity_tags",
+        "total_mib",
+        "used_mib",
+        "free_mib",
+        "processes",
+        "services"
+      ],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 0 },
+        "scheduled_monotonic_ns": { "type": "integer", "minimum": 0 },
+        "observed_monotonic_ns": { "type": "integer", "minimum": 0 },
+        "wall_utc": { "$ref": "#/$defs/utcTimestamp" },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "dots_resident",
+            "whisper_cold",
+            "co_resident_idle",
+            "active_overlap_1",
+            "active_overlap_2",
+            "post_workload",
+            "cleanup_verify"
+          ]
+        },
+        "activity_tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "dots_load",
+              "dots_resident",
+              "dots_inference",
+              "whisper_model_load",
+              "whisper_readiness",
+              "whisper_asr",
+              "whisper_alignment",
+              "whisper_diarization",
+              "cleanup"
+            ]
+          }
+        },
+        "total_mib": { "type": "integer", "minimum": 1 },
+        "used_mib": { "type": "integer", "minimum": 0 },
+        "free_mib": { "type": "integer", "minimum": 0 },
+        "processes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/processSample" }
+        },
+        "services": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/serviceAtSample" }
+        }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "configuration", "clocks", "phases", "interval_statistics", "samples", "vram_summary"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "configuration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "nominal_interval_ms",
+            "maximum_gap_ms",
+            "baseline_minimum_ms",
+            "dots_resident_minimum_ms",
+            "post_workload_minimum_ms",
+            "active_overlap_minimum_ms",
+            "cleanup_drift_limit_mib"
+          ],
+          "properties": {
+            "nominal_interval_ms": { "type": "integer", "minimum": 1, "maximum": 250 },
+            "maximum_gap_ms": { "const": 500 },
+            "baseline_minimum_ms": { "const": 10000 },
+            "dots_resident_minimum_ms": { "const": 10000 },
+            "post_workload_minimum_ms": { "const": 30000 },
+            "active_overlap_minimum_ms": { "const": 5000 },
+            "cleanup_drift_limit_mib": { "const": 512 }
+          }
+        },
+        "clocks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "monotonic_clock", "wall_clock", "maximum_reconciliation_error_ms", "observed_reconciliation_error_ms"],
+          "properties": {
+            "status": { "$ref": "#/$defs/status" },
+            "monotonic_clock": { "const": "monotonic_ns" },
+            "wall_clock": { "const": "utc_rfc3339" },
+            "maximum_reconciliation_error_ms": { "const": 500 },
+            "observed_reconciliation_error_ms": { "type": "number", "minimum": 0 }
+          }
+        },
+        "phases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "baseline",
+            "dots_resident",
+            "whisper_cold",
+            "co_resident_idle",
+            "active_overlap_1",
+            "active_overlap_2",
+            "post_workload",
+            "cleanup_verify"
+          ],
+          "properties": {
+            "baseline": { "$ref": "#/$defs/phaseMarker" },
+            "dots_resident": { "$ref": "#/$defs/phaseMarker" },
+            "whisper_cold": { "$ref": "#/$defs/phaseMarker" },
+            "co_resident_idle": { "$ref": "#/$defs/phaseMarker" },
+            "active_overlap_1": { "$ref": "#/$defs/phaseMarker" },
+            "active_overlap_2": { "$ref": "#/$defs/phaseMarker" },
+            "post_workload": { "$ref": "#/$defs/phaseMarker" },
+            "cleanup_verify": { "$ref": "#/$defs/phaseMarker" }
+          }
+        },
+        "interval_statistics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sample_count", "minimum_ms", "median_ms", "p95_ms", "maximum_ms", "missed_tick_count", "continuity_status"],
+          "properties": {
+            "sample_count": { "type": "integer", "minimum": 2 },
+            "minimum_ms": { "type": "number", "exclusiveMinimum": 0 },
+            "median_ms": { "type": "number", "exclusiveMinimum": 0 },
+            "p95_ms": { "type": "number", "exclusiveMinimum": 0 },
+            "maximum_ms": { "type": "number", "exclusiveMinimum": 0, "maximum": 500 },
+            "missed_tick_count": { "type": "integer", "minimum": 0 },
+            "continuity_status": { "$ref": "#/$defs/status" }
+          }
+        },
+        "samples": {
+          "type": "array",
+          "minItems": 2,
+          "items": { "$ref": "#/$defs/gpuSample" }
+        },
+        "vram_summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "total_mib",
+            "peak_used_mib",
+            "minimum_free_mib",
+            "required_headroom_mib",
+            "peak_phase",
+            "peak_sample_sequence",
+            "contributing_pids",
+            "unknown_process_count"
+          ],
+          "properties": {
+            "status": { "$ref": "#/$defs/status" },
+            "total_mib": { "type": "integer", "minimum": 1 },
+            "peak_used_mib": { "type": "integer", "minimum": 0 },
+            "minimum_free_mib": { "type": "integer", "minimum": 0 },
+            "required_headroom_mib": { "type": "integer", "minimum": 2048 },
+            "peak_phase": {
+              "type": "string",
+              "enum": [
+                "baseline",
+                "dots_resident",
+                "whisper_cold",
+                "co_resident_idle",
+                "active_overlap_1",
+                "active_overlap_2",
+                "post_workload",
+                "cleanup_verify"
+              ]
+            },
+            "peak_sample_sequence": { "type": "integer", "minimum": 0 },
+            "contributing_pids": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 1 },
+              "uniqueItems": true
+            },
+            "unknown_process_count": { "const": 0 }
+          }
+        }
+      }
+    },
+    "serviceObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service_ref",
+        "role",
+        "phase",
+        "monotonic_ns",
+        "wall_utc",
+        "health",
+        "readiness",
+        "restart_count",
+        "loaded_model_count"
+      ],
+      "properties": {
+        "service_ref": { "$ref": "#/$defs/opaqueId" },
+        "role": { "type": "string", "enum": ["autoedit_app", "whisper_worker", "dots", "ollama"] },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "baseline",
+            "dots_resident",
+            "whisper_cold",
+            "co_resident_idle",
+            "active_overlap_1",
+            "active_overlap_2",
+            "post_workload",
+            "cleanup_verify"
+          ]
+        },
+        "monotonic_ns": { "type": "integer", "minimum": 0 },
+        "wall_utc": { "$ref": "#/$defs/utcTimestamp" },
+        "health": { "type": "string", "enum": ["healthy", "unhealthy", "not_applicable", "unknown"] },
+        "readiness": { "type": "string", "enum": ["ready", "not_ready", "not_applicable", "unknown"] },
+        "restart_count": { "type": "integer", "minimum": 0 },
+        "loaded_model_count": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "observations", "restart_delta_zero", "ollama_unloaded_all_phases", "incidents"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "observations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/serviceObservation" }
+        },
+        "restart_delta_zero": { "type": "boolean" },
+        "ollama_unloaded_all_phases": { "type": "boolean" },
+        "incidents": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["oom", "cpu_offload", "model_eviction", "readiness_loss", "app_health_loss", "dots_health_loss", "queue_overflow", "unexpected_restart"],
+          "properties": {
+            "oom": { "const": false },
+            "cpu_offload": { "const": false },
+            "model_eviction": { "const": false },
+            "readiness_loss": { "const": false },
+            "app_health_loss": { "const": false },
+            "dots_health_loss": { "const": false },
+            "queue_overflow": { "const": false },
+            "unexpected_restart": { "const": false }
+          }
+        }
+      }
+    },
+    "workloadInterval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workload_ref", "kind", "phase", "status", "start_monotonic_ns", "end_monotonic_ns", "start_wall_utc", "end_wall_utc"],
+      "properties": {
+        "workload_ref": { "$ref": "#/$defs/opaqueId" },
+        "kind": { "type": "string", "enum": ["whisper_readiness", "whisper_analysis", "dots_inference"] },
+        "phase": { "type": "string", "enum": ["whisper_cold", "active_overlap_1", "active_overlap_2"] },
+        "status": { "$ref": "#/$defs/status" },
+        "start_monotonic_ns": { "type": "integer", "minimum": 0 },
+        "end_monotonic_ns": { "type": "integer", "minimum": 1 },
+        "start_wall_utc": { "$ref": "#/$defs/utcTimestamp" },
+        "end_wall_utc": { "$ref": "#/$defs/utcTimestamp" }
+      }
+    },
+    "whisperOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_ref",
+        "phase",
+        "status",
+        "job_done",
+        "input_hash_match",
+        "nonempty_aligned_words",
+        "ordered_bounded_integer_times",
+        "two_speaker_turns",
+        "raw_payload_present"
+      ],
+      "properties": {
+        "output_ref": { "$ref": "#/$defs/opaqueId" },
+        "phase": { "type": "string", "enum": ["whisper_cold", "active_overlap_1", "active_overlap_2"] },
+        "status": { "$ref": "#/$defs/status" },
+        "job_done": { "type": "boolean" },
+        "input_hash_match": { "type": "boolean" },
+        "nonempty_aligned_words": { "type": "boolean" },
+        "ordered_bounded_integer_times": { "type": "boolean" },
+        "two_speaker_turns": { "type": "boolean" },
+        "raw_payload_present": { "const": false }
+      }
+    },
+    "dotsOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "output_ref",
+        "phase",
+        "status",
+        "nonempty_bytes",
+        "playable_probe",
+        "duration_ms",
+        "post_processing_reported_separately",
+        "raw_audio_present"
+      ],
+      "properties": {
+        "output_ref": { "$ref": "#/$defs/opaqueId" },
+        "phase": { "type": "string", "enum": ["active_overlap_1", "active_overlap_2"] },
+        "status": { "$ref": "#/$defs/status" },
+        "nonempty_bytes": { "type": "integer", "minimum": 1 },
+        "playable_probe": { "type": "boolean" },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "post_processing_reported_separately": { "const": true },
+        "raw_audio_present": { "const": false }
+      }
+    },
+    "overlap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "phase", "whisper_workload_ref", "dots_workload_ref", "overlap_ms", "minimum_ms"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "phase": { "type": "string", "enum": ["active_overlap_1", "active_overlap_2"] },
+        "whisper_workload_ref": { "$ref": "#/$defs/opaqueId" },
+        "dots_workload_ref": { "$ref": "#/$defs/opaqueId" },
+        "overlap_ms": { "type": "integer", "minimum": 0 },
+        "minimum_ms": { "const": 5000 }
+      }
+    },
+    "workloads": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "intervals", "whisper_outputs", "dots_outputs", "overlaps"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "intervals": {
+          "type": "array",
+          "minItems": 6,
+          "items": { "$ref": "#/$defs/workloadInterval" }
+        },
+        "whisper_outputs": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": { "$ref": "#/$defs/whisperOutput" }
+        },
+        "dots_outputs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/dotsOutput" }
+        },
+        "overlaps": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/$defs/overlap" }
+        }
+      }
+    },
+    "cleanupAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource_ref", "action", "authorized", "status"],
+      "properties": {
+        "resource_ref": { "$ref": "#/$defs/opaqueId" },
+        "action": { "type": "string", "enum": ["stop_temporary_worker", "remove_temporary_worker", "unload_acceptance_model", "leave_approved_resident_service"] },
+        "authorized": { "type": "boolean" },
+        "status": { "$ref": "#/$defs/status" }
+      }
+    },
+    "cleanupAndRollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "actions",
+        "unapproved_resource_mutation_attempted",
+        "baseline_idle_median_used_mib",
+        "post_cleanup_idle_median_used_mib",
+        "raw_drift_mib",
+        "allowed_drift_mib",
+        "resident_exception",
+        "adjusted_drift_mib",
+        "app_healthy_after_cleanup",
+        "production_backends_after_cleanup",
+        "prior_artifacts_and_cuts_preserved",
+        "rollback"
+      ],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/cleanupAction" }
+        },
+        "unapproved_resource_mutation_attempted": { "const": false },
+        "baseline_idle_median_used_mib": { "type": "integer", "minimum": 0 },
+        "post_cleanup_idle_median_used_mib": { "type": "integer", "minimum": 0 },
+        "raw_drift_mib": { "type": "integer" },
+        "allowed_drift_mib": { "const": 512 },
+        "resident_exception": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["applied", "preauthorized", "service_ref", "explained_mib"],
+          "properties": {
+            "applied": { "type": "boolean" },
+            "preauthorized": { "type": "boolean" },
+            "service_ref": {
+              "anyOf": [
+                { "$ref": "#/$defs/opaqueId" },
+                { "type": "null" }
+              ]
+            },
+            "explained_mib": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "adjusted_drift_mib": { "type": "integer" },
+        "app_healthy_after_cleanup": { "type": "boolean" },
+        "production_backends_after_cleanup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["whisper", "diarize"],
+          "properties": {
+            "whisper": { "const": "mock" },
+            "diarize": { "const": "mock" }
+          }
+        },
+        "prior_artifacts_and_cuts_preserved": { "type": "boolean" },
+        "rollback": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "triggered", "worker_stopped_if_authorized", "mock_left_or_restored", "retry_changed_production_defaults"],
+          "properties": {
+            "status": { "$ref": "#/$defs/status" },
+            "triggered": { "type": "boolean" },
+            "worker_stopped_if_authorized": { "type": "boolean" },
+            "mock_left_or_restored": { "type": "boolean" },
+            "retry_changed_production_defaults": { "const": false }
+          }
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation_id",
+        "phase",
+        "read_only",
+        "authorization_required",
+        "authorization_ref",
+        "argv_redacted",
+        "started_at_utc",
+        "ended_at_utc",
+        "exit_code",
+        "timed_out",
+        "stdout_retained",
+        "stderr_retained",
+        "result_digest",
+        "redaction_status"
+      ],
+      "properties": {
+        "operation_id": { "$ref": "#/$defs/opaqueId" },
+        "phase": {
+          "type": "string",
+          "enum": ["discovery", "preflight", "baseline", "dots_resident", "whisper_cold", "co_resident_idle", "active_overlap_1", "active_overlap_2", "post_workload", "cleanup_verify", "rollback", "offline_test"]
+        },
+        "read_only": { "type": "boolean" },
+        "authorization_required": { "type": "boolean" },
+        "authorization_ref": {
+          "anyOf": [
+            { "$ref": "#/$defs/opaqueId" },
+            { "type": "null" }
+          ]
+        },
+        "argv_redacted": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^(?!.*(?:/mnt/user|/data/|Bearer[ ]|-----BEGIN|https?://[^ ]+@)).*$"
+          }
+        },
+        "started_at_utc": { "$ref": "#/$defs/utcTimestamp" },
+        "ended_at_utc": { "$ref": "#/$defs/utcTimestamp" },
+        "exit_code": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "timed_out": { "type": "boolean" },
+        "stdout_retained": { "const": false },
+        "stderr_retained": { "const": false },
+        "result_digest": { "$ref": "#/$defs/sha256" },
+        "redaction_status": { "$ref": "#/$defs/status" }
+      }
+    },
+    "testResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["test_ref", "scenario_id", "status", "command_ref", "exit_code", "external_access_attempted"],
+      "properties": {
+        "test_ref": { "$ref": "#/$defs/opaqueId" },
+        "scenario_id": {
+          "type": "string",
+          "enum": [
+            "positive_schema_valid_redacted",
+            "nominal_interval_too_slow",
+            "sampler_gap",
+            "phase_missing",
+            "phase_reordered",
+            "phase_duplicated",
+            "baseline_too_short",
+            "resident_too_short",
+            "post_too_short",
+            "process_accounting_absent",
+            "process_accounting_malformed",
+            "clock_irreconcilable",
+            "health_failure",
+            "restart_detected",
+            "readiness_failure",
+            "app_failure",
+            "dots_failure",
+            "ollama_loaded",
+            "output_invalid",
+            "overlap_too_short",
+            "cleanup_drift",
+            "mock_backend_recheck_failure",
+            "unknown_gpu_process",
+            "vram_headroom_failure",
+            "command_timeout",
+            "command_error",
+            "malformed_backend_data",
+            "authorization_missing",
+            "non_read_only_discovery_rejected",
+            "redaction_secret_input",
+            "redaction_secret_output",
+            "malformed_worker_output",
+            "wrong_input_hash",
+            "worker_unavailable",
+            "persistence_failure",
+            "stale_mapping",
+            "unresolved_identity",
+            "missing_wide_camera"
+          ]
+        },
+        "status": { "$ref": "#/$defs/status" },
+        "command_ref": { "$ref": "#/$defs/opaqueId" },
+        "exit_code": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "external_access_attempted": { "const": false }
+      }
+    },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "exact_candidate", "network_isolated", "results"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "exact_candidate": { "type": "boolean" },
+        "network_isolated": { "type": "boolean" },
+        "results": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/testResult" }
+        }
+      }
+    },
+    "requirementResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "validation_rule_ids", "evidence_refs", "failure_codes"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "validation_rule_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/safeCode" }
+        },
+        "evidence_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/jsonPointer" }
+        },
+        "failure_codes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/safeCode" }
+        }
+      }
+    },
+    "requirementResults": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "OPS-AIGPU1-001",
+        "OPS-AIGPU1-002",
+        "OPS-AIGPU1-003",
+        "OPS-AIGPU1-004",
+        "OPS-AIGPU1-005",
+        "OPS-AIGPU1-006",
+        "OPS-AIGPU1-007",
+        "OPS-AIGPU1-008",
+        "SEC-AIGPU1-002",
+        "SEC-AIGPU1-003",
+        "TEST-AIGPU1-005",
+        "TEST-AIGPU1-007",
+        "TEST-AIGPU1-008"
+      ],
+      "properties": {
+        "OPS-AIGPU1-001": { "$ref": "#/$defs/requirementResult" },
+        "OPS-AIGPU1-002": { "$ref": "#/$defs/requirementResult" },
+        "OPS-AIGPU1-003": { "$ref": "#/$defs/requirementResult" },
+        "OPS-AIGPU1-004": { "$ref": "#/$defs/requirementResult" },
+        "OPS-AIGPU1-005": { "$ref": "#/$defs/requirementResult" },
+        "OPS-AIGPU1-006": { "$ref": "#/$defs/requirementResult" },
+        "OPS-AIGPU1-007": { "$ref": "#/$defs/requirementResult" },
+        "OPS-AIGPU1-008": { "$ref": "#/$defs/requirementResult" },
+        "SEC-AIGPU1-002": { "$ref": "#/$defs/requirementResult" },
+        "SEC-AIGPU1-003": { "$ref": "#/$defs/requirementResult" },
+        "TEST-AIGPU1-005": { "$ref": "#/$defs/requirementResult" },
+        "TEST-AIGPU1-007": { "$ref": "#/$defs/requirementResult" },
+        "TEST-AIGPU1-008": { "$ref": "#/$defs/requirementResult" }
+      }
+    },
+    "overall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "acceptance_pass", "failed_requirements", "residual_risk_codes", "summary_digest"],
+      "properties": {
+        "status": { "$ref": "#/$defs/status" },
+        "acceptance_pass": { "type": "boolean" },
+        "failed_requirements": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "OPS-AIGPU1-001",
+              "OPS-AIGPU1-002",
+              "OPS-AIGPU1-003",
+              "OPS-AIGPU1-004",
+              "OPS-AIGPU1-005",
+              "OPS-AIGPU1-006",
+              "OPS-AIGPU1-007",
+              "OPS-AIGPU1-008",
+              "SEC-AIGPU1-002",
+              "SEC-AIGPU1-003",
+              "TEST-AIGPU1-005",
+              "TEST-AIGPU1-007",
+              "TEST-AIGPU1-008"
+            ]
+          }
+        },
+        "residual_risk_codes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/safeCode" }
+        },
+        "summary_digest": { "$ref": "#/$defs/sha256" }
+      }
+    }
+  },
+  "x-autoedit-semantic-rules": [
+    { "id": "VAL-AUTH-001", "rule": "A live action is forbidden unless discovery is complete, authorization.status is pass, explicit_peter_authorization is true, the current UTC time is inside the authorized window, and the exact host, fixture, actions, and cleanup resources are in authorization.scope." },
+    { "id": "VAL-AUTH-002", "rule": "Discovery, preparation, schema validation, mock execution, a prior authorization, or a human acceptance of code is never live authorization." },
+    { "id": "VAL-DISC-001", "rule": "Discovery operations are allowlisted read-only operations. No health/readiness probe may start, restart, recreate, load, unload, or otherwise ensure a service." },
+    { "id": "VAL-COMPOSE-001", "rule": "Compose is rendered and parsed without up, start, run, restart, create, pull, build, or service mutation. Raw interpolated output is held in memory only; only the redacted canonical render and its digest may persist." },
+    { "id": "VAL-SAMPLE-001", "rule": "nominal_interval_ms is 1..250; scheduled tick spacing is <=250 ms; sequences and monotonic times strictly increase; observed gaps are positive and <=500 ms; every sample reconciles total=used+free and records process and service arrays." },
+    { "id": "VAL-CLOCK-001", "rule": "Monotonic time is authoritative for order, duration, and overlap. Wall and monotonic elapsed time differ by no more than 500 ms across run anchors and phase markers; a backward or irreconcilable clock fails." },
+    { "id": "VAL-PHASE-001", "rule": "All eight phases exist exactly once, follow sequence 0..7 without overlap or inversion, and every sample belongs to the enclosing phase. baseline and dots_resident each last >=10000 ms; post_workload begins after both final workloads end and lasts >=30000 ms before cleanup." },
+    { "id": "VAL-PROCESS-001", "rule": "Every GPU process row has an exact positive PID, allowlisted basename, non-negative per-process MiB, and approved attribution. Missing process accounting or any unknown process fails." },
+    { "id": "VAL-OVERLAP-001", "rule": "For active_overlap_1 and active_overlap_2, overlap_ms=min(end)-max(start) from actual inference intervals is >=5000 ms. Phase duration alone is not evidence." },
+    { "id": "VAL-OUTPUT-001", "rule": "Exactly three Whisper outputs cover cold, overlap 1, and overlap 2; each reaches done, matches the private input hash, and has non-empty ordered bounded aligned words plus two-speaker turns. Exactly two Dots outputs cover overlap 1 and overlap 2; each is non-empty and passes a playable-media probe. Raw content is absent." },
+    { "id": "VAL-HEALTH-001", "rule": "App, worker, and Dots remain healthy; worker and Dots are ready when applicable; restart deltas are zero; Ollama loaded_model_count is zero before, throughout, and after measurement; no OOM, offload, eviction, readiness loss, queue overflow, or health loss occurs." },
+    { "id": "VAL-VRAM-001", "rule": "All samples use one device total. The global peak across all samples is reported with phase, sample, PID contributors, minimum free, and required headroom=max(2048,ceil(total_mib*0.10)); minimum_free_mib must be >= required_headroom_mib." },
+    { "id": "VAL-CLEANUP-001", "rule": "Only preauthorized temporary/opt-in resources may be changed. adjusted_drift_mib=post_cleanup_median-baseline_median-preauthorized_explained_mib and must be <=512; a resident exception must be declared before live activity. App health and both mock backend values pass after cleanup." },
+    { "id": "VAL-ROLLBACK-001", "rule": "Any live mandatory fail, skipped, unavailable, or unauthorized result stops further workload submission, invokes only authorized cleanup/rollback, preserves prior artifacts/cuts, leaves or restores mock, reports the failed requirement, and exits non-zero. A retry never changes production defaults." },
+    { "id": "VAL-REDACT-001", "rule": "A live pass uses only the approved opaque secret-source reference and persists no secret values in evidence, argv, or public errors. Deep redaction runs before every write, stdout/stderr emission, exception message, and durable summary. Prohibited keys or values cause redaction_failure; unredacted raw command output is never retained." },
+    { "id": "VAL-CANDIDATE-001", "rule": "A live pass requires non-null exact source commit, immutable worker image digest, canonical redacted Compose-render digest, runtime versions, opaque project/fixture/run references, FPS rational, automatic sync offsets, private input-hash match=true, and the fixed Whisper/Dots configurations. Discovery/mock placeholders cannot satisfy this rule." },
+    { "id": "VAL-STATUS-001", "rule": "pass means executed and met; fail means executed and breached; skipped means deliberately not executed; unavailable means an allowed dependency or observation was absent; unauthorized means permission was absent or out of scope. run.status equals overall.status; overall.failed_requirements exactly lists non-pass requirement_results. For a live run every mandatory check and requirement must be pass; all other states make overall.acceptance_pass false and exit non-zero." },
+    { "id": "VAL-MODE-001", "rule": "A successful discovery-only or mock command may exit zero but must set acceptance_eligible=false and acceptance_pass=false. Only a fully passing authorized live run may set acceptance_pass=true." },
+    { "id": "VAL-TEST-001", "rule": "Offline tests deny network and external commands by default, use injected fakes, assert schema validity, status, sanitized diagnostics, and non-zero exit for every required negative scenario." }
+  ],
+  "x-autoedit-requirement-map": {
+    "OPS-AIGPU1-001": ["VAL-AUTH-001", "VAL-AUTH-002", "VAL-DISC-001", "#/discovery", "#/authorization"],
+    "OPS-AIGPU1-002": ["VAL-COMPOSE-001", "#/compose"],
+    "OPS-AIGPU1-003": ["VAL-SAMPLE-001", "VAL-CLOCK-001", "VAL-PHASE-001", "VAL-PROCESS-001", "#/measurement"],
+    "OPS-AIGPU1-004": ["VAL-PHASE-001", "VAL-OVERLAP-001", "VAL-OUTPUT-001", "#/workloads", "#/services"],
+    "OPS-AIGPU1-005": ["VAL-VRAM-001", "#/measurement/vram_summary"],
+    "OPS-AIGPU1-006": ["VAL-HEALTH-001", "VAL-OUTPUT-001", "#/services", "#/workloads"],
+    "OPS-AIGPU1-007": ["VAL-CLEANUP-001", "#/cleanup_and_rollback"],
+    "OPS-AIGPU1-008": ["VAL-ROLLBACK-001", "VAL-STATUS-001", "VAL-MODE-001", "#/cleanup_and_rollback/rollback", "#/run/exit"],
+    "SEC-AIGPU1-002": ["VAL-REDACT-001", "#/redaction/secret_source", "#/redaction/scan", "#/commands"],
+    "SEC-AIGPU1-003": ["VAL-COMPOSE-001", "#/compose/worker_loopback_only", "#/compose/worker_reachable_from_lan_or_npm", "#/compose/media_mount_read_only", "#/compose/media_path_confined"],
+    "TEST-AIGPU1-005": ["VAL-SAMPLE-001", "VAL-PHASE-001", "VAL-OVERLAP-001", "VAL-HEALTH-001", "VAL-OUTPUT-001", "VAL-VRAM-001", "#/measurement", "#/services", "#/workloads"],
+    "TEST-AIGPU1-007": ["VAL-REDACT-001", "VAL-CANDIDATE-001", "#/candidate", "#/project_context", "#/commands", "#/requirement_results"],
+    "TEST-AIGPU1-008": ["VAL-TEST-001", "VAL-ROLLBACK-001", "#/tests/results"]
+  }
+}

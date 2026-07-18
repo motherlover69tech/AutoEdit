@@ -9,6 +9,7 @@ enough to establish an identity.
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime
 from typing import Annotated, Literal, Sequence
 
 from pydantic import Field, StrictFloat, StringConstraints, model_validator
@@ -50,6 +51,11 @@ class ConfirmedSpeakerMapping(StrictContract):
     diarizer_speaker_id: SafeId
     speaker_id: SafeId
     human_label: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = None
+    operator_id: SafeId | None = None
+    confirmed_at: datetime | None = None
+    source_run_id: SafeId | None = None
+    source_artifact_version: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = None
+    evidence_turn_ids: list[SafeId] = Field(default_factory=list)
 
 
 class PriorConfirmedSpeaker(StrictContract):
@@ -184,6 +190,11 @@ def resolve_speaker_mappings(
                 status=status,
                 confidence=confidence,
                 evidence=sorted(audit_ids),
+                operator_id=(operator_items[0].operator_id if operator_items else None),
+                confirmed_at=(operator_items[0].confirmed_at if operator_items else None),
+                source_run_id=(operator_items[0].source_run_id if operator_items else None),
+                source_artifact_version=(operator_items[0].source_artifact_version if operator_items else None),
+                evidence_turn_ids=sorted({turn_id for item in operator_items for turn_id in item.evidence_turn_ids}),
             )
         )
         if speaker_id is not None and provenance is not None:

@@ -12,6 +12,7 @@ import json
 import shutil
 import threading
 import time
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile, status
 from fastapi.exceptions import RequestValidationError
@@ -31,6 +32,8 @@ from autoedit.auth import (
     parse_session_token,
     verify_password,
 )
+from autoedit.ai.speaker_confirmation import ArtifactValidationError, artifact_version, load_artifact, snippets, validate_confirmation_payload
+from autoedit.ai.activity_from_turns import activity_from_turns
 from autoedit.activity import compute_activity_timeline
 from autoedit.audio import SyncQualityError, compute_sync_offsets, extract_channel, extract_guide_track
 from autoedit.conciseness import grade_conciseness
@@ -45,6 +48,7 @@ from autoedit.db.schema import (
     jobs,
     notes,
     projects,
+    speaker_confirmations,
     speaking_intervals,
     topics,
     topic_spans,
@@ -180,6 +184,18 @@ class NoteCreate(BaseModel):
     t_ms: int = Field(ge=0)
     body: str = Field(min_length=1, max_length=10000)
     kind: Literal["note", "cut_suggestion"] = "note"
+
+
+class SpeakerConfirmationRequest(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    diarizer_speaker_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    speaker_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    camera_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=26, max_length=26)]
+    source_run_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    source_artifact_version: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    evidence_turn_ids: list[Annotated[str, StringConstraints(min_length=1, max_length=128)]] = Field(min_length=2)
+    expected_version: int | None = Field(default=None, ge=1, strict=True)
 
 
 def _public_origin(public_domain: str | None) -> str | None:
@@ -1029,6 +1045,76 @@ def create_app(
             return None
         return f"/projects/{project_id}/media/{kind}/{filename}"
 
+    @app.get("/projects/{project_id}/speaker-confirmations")
+    def get_speaker_confirmations(project_id: str) -> dict:
+        project = get_project_record(app_engine, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        artifact = load_artifact(project_root(app_data_root, project_id), strict=False)
+        if artifact is None:
+            raise HTTPException(status_code=400, detail="completed AI artifact not found")
+        current_version = artifact_version(artifact)
+        snippet_map = snippets(artifact)
+        with Session(app_engine) as session:
+            camera_rows = session.execute(select(angles).where(angles.c.project_id == project_id)).all()
+            speaker_rows = session.execute(select(audio_channels.c.speaker_label).where(audio_channels.c.project_id == project_id)).all()
+            rows = session.execute(select(speaker_confirmations).where(speaker_confirmations.c.project_id == project_id)).all()
+        cameras = [{"id": row._mapping["id"], "label": row._mapping["label"], "role": row._mapping["role"]} for row in camera_rows]
+        stable_speakers = sorted({str(row._mapping["speaker_label"]) for row in speaker_rows if row._mapping["speaker_label"]})
+        confirmations = []
+        for row in rows:
+            item = dict(row._mapping)
+            item["is_current"] = item["source_artifact_version"] == current_version
+            if not item["is_current"]:
+                item["status"] = "stale"
+            item["confirmed_at"] = item["confirmed_at"].isoformat()
+            confirmations.append(item)
+        labels = []
+        for label, turns in sorted(snippet_map.items()):
+            current = next((item for item in confirmations if item["diarizer_speaker_id"] == label and item["is_current"]), None)
+            historical = next((item for item in confirmations if item["diarizer_speaker_id"] == label), None)
+            labels.append({"diarizer_speaker_id": label, "status": current["status"] if current else ("stale" if historical else "needs_confirmation"), "confirmation": current or historical, "snippets": [{**turn, "url": f"/projects/{project_id}/media/audio/program.m4a?start_ms={turn['start_ms']}&end_ms={turn['end_ms']}"} for turn in turns]})
+        return {"artifact_version": current_version, "run_id": current_version, "speakers": stable_speakers, "cameras": cameras, "labels": labels}
+
+    @app.put("/projects/{project_id}/speaker-confirmations")
+    def save_speaker_confirmation(project_id: str, payload: SpeakerConfirmationRequest, request: Request) -> dict:
+        project = get_project_record(app_engine, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        artifact = load_artifact(project_root(app_data_root, project_id), strict=False)
+        if artifact is None:
+            raise HTTPException(status_code=400, detail="completed AI artifact not found")
+        current_version = artifact_version(artifact)
+        if payload.source_run_id != current_version or payload.source_artifact_version != current_version:
+            raise HTTPException(status_code=409, detail="stale AI artifact version; reload confirmation panel")
+        try:
+            validate_confirmation_payload(artifact=artifact, diarizer_speaker_id=payload.diarizer_speaker_id, speaker_id=payload.speaker_id, camera_id=payload.camera_id, evidence_turn_ids=payload.evidence_turn_ids)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        operator = (getattr(request.state, "session", None) or {}).get("user_id") or (getattr(request.state, "session", None) or {}).get("username") or "operator"
+        now = datetime.now(UTC).replace(tzinfo=None)
+        with Session(app_engine) as session:
+            camera = session.execute(select(angles.c.id).where(angles.c.id == payload.camera_id, angles.c.project_id == project_id)).scalar_one_or_none()
+            if camera is None:
+                raise HTTPException(status_code=400, detail="camera does not belong to project")
+            existing = session.execute(select(speaker_confirmations).where(speaker_confirmations.c.project_id == project_id)).all()
+            current = next((row._mapping for row in existing if row._mapping["diarizer_speaker_id"] == payload.diarizer_speaker_id), None)
+            if payload.expected_version is not None and (current is None or current["version"] != payload.expected_version):
+                raise HTTPException(status_code=409, detail="confirmation changed; reload before saving")
+            for row in existing:
+                item = row._mapping
+                if item["diarizer_speaker_id"] != payload.diarizer_speaker_id and (item["speaker_id"] == payload.speaker_id or item["camera_id"] == payload.camera_id) and item["source_artifact_version"] == current_version:
+                    raise HTTPException(status_code=409, detail="confirmation must be bijective; identity or camera is already used")
+            values = {"project_id": project_id, "diarizer_speaker_id": payload.diarizer_speaker_id, "speaker_id": payload.speaker_id, "camera_id": payload.camera_id, "status": "confirmed", "operator_id": str(operator), "confirmed_at": now, "source_run_id": current_version, "source_artifact_version": current_version, "evidence_turn_ids": payload.evidence_turn_ids, "version": (current["version"] + 1 if current else 1)}
+            if current:
+                session.execute(speaker_confirmations.update().where(speaker_confirmations.c.id == current["id"]).values(**values))
+                confirmation_id = current["id"]
+            else:
+                confirmation_id = new_ulid()
+                session.execute(speaker_confirmations.insert().values(id=confirmation_id, **values))
+            session.commit()
+        return {"id": confirmation_id, **values, "confirmed_at": now.isoformat(), "artifact_version": current_version}
+
     @app.get("/projects/{project_id}/player-state")
     def get_player_state(project_id: str) -> dict:
         project = get_project_record(app_engine, project_id)
@@ -1144,7 +1230,22 @@ def create_app(
                     except (ValueError, UnicodeDecodeError):
                         pass
 
+        try:
+            ai_player_artifact = load_artifact(project_dir)
+        except ArtifactValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        analysis_source = cdl.get("analysis_source", "vad")
+        analysis_version = cdl.get("analysis_artifact_version")
+        mapping_status = "baseline"
+        if analysis_source == "whisperx" and ai_player_artifact is not None:
+            mapping_status = "confirmed"
+        elif ai_player_artifact is not None:
+            mapping_status = "needs_confirmation"
+        analysis_payload = {"source": analysis_source, "mapping_status": mapping_status}
+        if analysis_version:
+            analysis_payload["artifact_version"] = analysis_version
         return {
+            "analysis": analysis_payload,
             "project": {
                 "id": project["id"],
                 "name": project["name"],
@@ -2664,6 +2765,58 @@ def create_app(
         # separate recorder/camera, so do not use it directly for speaker cuts.
         speaker_to_angle = _speaker_camera_map(angle_rows, ch_rows)
 
+        # A completed WhisperX artifact becomes authoritative only after the
+        # operator's current, bijective confirmations are present.  Never use
+        # suggested artifact mappings or silently fall back to VAD in this path.
+        try:
+            ai_artifact = load_artifact(project_dir)
+        except ArtifactValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if ai_artifact is not None:
+            current_version = artifact_version(ai_artifact)
+            with Session(app_engine) as session:
+                confirmation_rows = session.execute(
+                    select(speaker_confirmations).where(
+                        speaker_confirmations.c.project_id == project_id,
+                        speaker_confirmations.c.source_artifact_version == current_version,
+                        speaker_confirmations.c.status == "confirmed",
+                    )
+                ).all()
+            confirmations = {row._mapping["diarizer_speaker_id"]: row._mapping for row in confirmation_rows}
+            observed = {str(turn["diarizer_speaker_id"]) for turn in ai_artifact.get("diarization_turns", [])}
+            if observed != set(confirmations):
+                raise HTTPException(
+                    status_code=409,
+                    detail="current speaker confirmations are required before generating the AI cut",
+                )
+            speaker_to_angle = {item["speaker_id"]: item["camera_id"] for item in confirmations.values()}
+            resolved_ids = {str(turn["source_turn_id"]) for turn in ai_artifact.get("speaker_turns", [])
+                            if turn.get("provenance") in {"confirmed_mapping", "prior_confirmed_mapping"}}
+            turns = [
+                {"start_ms": int(turn["start_ms"]), "end_ms": int(turn["end_ms"]),
+                 "speaker_id": next((item["speaker_id"] for item in confirmations.values()
+                                      if item["diarizer_speaker_id"] == turn["diarizer_speaker_id"]), None),
+                 "confidence": turn.get("confidence")}
+                for turn in ai_artifact.get("speaker_turns", [])
+                if turn.get("provenance") in {"confirmed_mapping", "prior_confirmed_mapping"}
+            ]
+            turns.extend(
+                {"start_ms": int(turn["start_ms"]), "end_ms": int(turn["end_ms"]),
+                 "speaker_id": None, "confidence": turn.get("confidence")}
+                for turn in ai_artifact.get("diarization_turns", [])
+                if str(turn["turn_id"]) not in resolved_ids
+            )
+            try:
+                timeline = activity_from_turns(turns, timeline_end_ms=int(ai_artifact["timeline_end_ms"]), confidence_threshold=0.5)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail=f"invalid AI activity artifact: {exc}") from exc
+            activity = {"timeline": timeline, "total_duration_ms": int(ai_artifact["timeline_end_ms"]),
+                        "source": "whisperx", "artifact_version": current_version}
+            (project_dir / "audio" / "ai" / "v1").mkdir(parents=True, exist_ok=True)
+            tmp_activity = project_dir / "audio" / "ai" / "v1" / "activity-whisperx.json.tmp"
+            tmp_activity.write_text(json.dumps(activity, indent=2) + "\n")
+            tmp_activity.replace(project_dir / "audio" / "ai" / "v1" / "activity-whisperx.json")
+
         # Build sync offsets in the same timeline basis as activity.json. The
         # activity timeline comes from extracted speaker channel WAVs, so its
         # zero is the primary audio-source angle, not necessarily the wide angle.
@@ -2679,15 +2832,18 @@ def create_app(
 
         # Generate CDL
         cut_params = payload.params if payload else None
-        cdl = generate_cdl(
-            timeline,
-            speaker_to_angle,
-            sync_offsets,
-            wide_angle_id=wide_angle_id,
-            fps_num=project["fps_num"],
-            fps_den=project["fps_den"],
-            params=cut_params,
-        )
+        try:
+            cdl = generate_cdl(
+                timeline,
+                speaker_to_angle,
+                sync_offsets,
+                wide_angle_id=wide_angle_id,
+                fps_num=project["fps_num"],
+                fps_den=project["fps_den"],
+                params=cut_params,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"cut generation failed closed: {exc}") from exc
         cdl["project_id"] = project_id
 
         # ── Clamp trailing clips to available source media ────────────
@@ -2737,8 +2893,7 @@ def create_app(
             return True
 
         def _fallback_clip(t_in: int, t_out: int, original: dict, previous_angle_id: str | None) -> dict | None:
-            preferred = [base_angle_id, previous_angle_id, *speaker_to_angle.values()]
-            preferred.extend(a.id for a in angle_rows)
+            preferred = ([wide_angle_id] if ai_artifact is not None else [base_angle_id, previous_angle_id, *speaker_to_angle.values()])
             seen: set[str] = set()
             for angle_id in preferred:
                 if not angle_id or angle_id in seen or angle_id == original["angle_id"]:
@@ -2806,6 +2961,18 @@ def create_app(
             repaired_clips.append(clip)
         clips_list[:] = repaired_clips
 
+        # An AI-authoritative cut must cover the whole accepted master timeline.
+        # A missing/exhausted wide source is a visible failure, never a partial
+        # CDL or an arbitrary close-up fallback.
+        if ai_artifact is not None:
+            expected_end = int(ai_artifact["timeline_end_ms"])
+            actual_end = (
+                clips_list[-1]["timeline_in_ms"] + clips_list[-1]["dur_ms"]
+                if clips_list else None
+            )
+            if not clips_list or clips_list[0]["timeline_in_ms"] != 0 or actual_end != expected_end:
+                raise HTTPException(status_code=422, detail="AI cut generation failed closed: no complete source-bound CDL")
+
         while clips_list:
             last = clips_list[-1]
             media_ms = angle_duration_ms.get(last["angle_id"])
@@ -2841,6 +3008,14 @@ def create_app(
             source_durations_ms=angle_duration_ms,
         )
         cdl["validation"] = cut_validation
+        if not cut_validation.get("valid"):
+            raise HTTPException(
+                status_code=422,
+                detail=f"cut generation failed closed: {cut_validation.get('error', 'invalid CDL')}",
+            )
+        cdl["analysis_source"] = "whisperx" if ai_artifact is not None else "vad"
+        if ai_artifact is not None:
+            cdl["analysis_artifact_version"] = artifact_version(ai_artifact)
 
         # Write edit/cdl.json
         edit_dir = project_dir / "edit"

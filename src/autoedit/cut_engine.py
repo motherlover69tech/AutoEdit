@@ -62,6 +62,7 @@ def _shot_reason_fields(reason: str) -> dict[str, str]:
         "periodic:wide": ("variety_wide", "Variety shot", "Breaks up a long-held shot"),
         "unresolved:wide": ("unresolved_speaker", "Unresolved speaker", "Wide is safer than a wrong close-up"),
         "low_confidence:wide": ("low_confidence", "Low confidence", "Wide is safer than a wrong close-up"),
+        "off_camera:wide": ("off_camera", "Off-camera / uncertain", "Wide is safer when camera coverage is uncertain"),
     }
     if reason.startswith("source_unavailable:"):
         original_angle = reason.split(":", 2)[1]
@@ -110,7 +111,11 @@ def _resolve_activity_segments(
     for seg in activity_timeline:
         active = seg.get("active", [])
         levels = seg.get("levels", {}) or {}
-        if len(active) == 0:
+        forced_reason = None
+        if seg.get("safe_wide"):
+            kind, speaker = "overlap", None
+            forced_reason = seg.get("reason") or "unresolved:wide"
+        elif len(active) == 0:
             kind, speaker = "silence", None
         elif len(active) == 1:
             kind, speaker = "solo", active[0]
@@ -130,6 +135,9 @@ def _resolve_activity_segments(
         }
         if kind == "overlap":
             intent["active"] = list(active)
+            if forced_reason:
+                intent["reason"] = forced_reason
+                intent["safe_wide"] = True
         elif kind == "solo" and len(active) > 1:
             intent["reason"] = f"dominance:{speaker}"
         intents.append(intent)
@@ -139,6 +147,8 @@ def _resolve_activity_segments(
     if overlap_min_ms > 0:
         for i, it in enumerate(intents):
             if it["kind"] != "overlap":
+                continue
+            if it.get("safe_wide"):
                 continue
             if it["end_ms"] - it["start_ms"] >= overlap_min_ms:
                 continue
@@ -323,7 +333,10 @@ def _enforce_min_shot_ms(clips: list[dict[str, Any]], min_shot_ms: int) -> list[
         same_prev = bool(result and result[-1]["angle_id"] == clip["angle_id"])
         same_next = bool(i + 1 < len(clips) and clips[i + 1]["angle_id"] == clip["angle_id"])
 
-        if clip["dur_ms"] >= min_shot_ms:
+        protected_wide = str(clip.get("reason", "")).split(":", 1)[0] in {
+            "unresolved", "low_confidence", "off_camera", "overlap"
+        }
+        if clip["dur_ms"] >= min_shot_ms or protected_wide:
             result.append(clip)
             i += 1
             continue
@@ -494,7 +507,10 @@ def generate_cdl(
     wide_interval_jitter = effective["wide_interval_jitter"]
 
     # Resolve wide angle
-    if wide_angle_id is None:
+    ai_source = any(segment.get("source") == "whisperx" for segment in activity_timeline)
+    if wide_angle_id is None and ai_source:
+        raise ValueError("wide angle is required for WhisperX activity")
+    if wide_angle_id is None and not ai_source:
         all_angles = set(speaker_to_angle.values())
         wide_angle_id = next(iter(all_angles)) if all_angles else None
 
@@ -514,7 +530,11 @@ def generate_cdl(
 
         if it["kind"] == "solo":
             angle_id = speaker_to_angle.get(it["speaker"])
-            reason = it.get("reason") or f"speaker:{it['speaker']}"
+            if angle_id is None:
+                angle_id = wide_angle_id
+                reason = "unresolved:wide"
+            else:
+                reason = it.get("reason") or f"speaker:{it['speaker']}"
         elif it["kind"] == "overlap" and overlap_to_wide:
             angle_id = wide_angle_id
             reason = it.get("reason") or "overlap:wide"
@@ -537,7 +557,7 @@ def generate_cdl(
                 reason = "silence:hold"
 
         if angle_id is None:
-            continue
+            raise ValueError(f"no available angle for activity reason {reason}")
 
         raw_clips.append({
             "angle_id": angle_id,

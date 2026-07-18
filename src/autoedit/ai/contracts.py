@@ -139,6 +139,11 @@ class SpeakerMapping(StrictContract):
     evidence: list[Annotated[str, StringConstraints(min_length=1, max_length=255)]] = Field(
         default_factory=list
     )
+    operator_id: SafeId | None = None
+    confirmed_at: datetime | None = None
+    source_run_id: SafeId | None = None
+    source_artifact_version: Annotated[str, StringConstraints(min_length=1, max_length=128)] | None = None
+    evidence_turn_ids: list[SafeId] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_resolution(self) -> "SpeakerMapping":

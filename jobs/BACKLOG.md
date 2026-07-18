@@ -8,11 +8,11 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 **Current engineering pickup: AI-GPU-1 application acceptance.** Artifact corrections, deterministic Phase 4 speaker resolution, queued ASR/alignment, and an isolated constrained-diarization smoke have passed. Next, verify selected WhisperX word timestamps against consent-cleared source/player media within one project frame, then complete operator-confirmed speaker identity, speaker-turn cut acceptance, and valid peak-VRAM/coexistence measurements. Keep production on mock backends.
 
-The separate UI manual gate remains Stage 7.4 XSS-safe notes and multi-author verification; it may proceed independently but does not supersede the active AI corrective job.
+The separate UI acceptance gate remains Stage 7.4 and may proceed independently. It now requires an independent rerun against exact deployed commit `c096e4e`: a candidate-local Chromium harness passed XSS safety, two-author rendering, marker seek, and delete synchronization, while Tester card `t_1a379f2a` accidentally tested old `master` at `87b9d47` and therefore cannot decide the deployed release.
 
-Final local reconciliation checkpoint: `685 passed, 2 skipped`. V100 `/ready`, queued real ASR/alignment and constrained diarization, and the audit-only Qwen context pass succeeded; frame-level timing, confirmed speaker identity, speaker-turn cut acceptance, coexistence measurements, and the consent-cleared benchmark remain open.
+Final deterministic local checkpoint (2026-07-16): `OLLAMA_BASE_URL='' LLM_MODEL='' env -u VIRTUAL_ENV uv run pytest -q -rs` → `691 passed, 1 skipped`; the only skip is the credential-gated central-MySQL integration test. V100 `/ready`, queued real ASR/alignment and constrained diarization, and the audit-only Qwen context pass succeeded; frame-level timing, confirmed speaker identity, speaker-turn cut acceptance, coexistence measurements, and the consent-cleared benchmark remain open.
 
-Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`, no lead/tail, overlap/silence→wide). Existing cuts retain stored params until regenerated; live project `sm test` was regenerated as `Direct rough cut`.
+Deployment note: Publisher card `t_26cf76c6` records `DEPLOYED_AND_VERIFIED` for exact non-`master` integration commit `c096e4e179291d910fbdb8864916318cbfd28c64` and image `sha256:3ac84cf4f23fa287fe40fc33a3121aae1680636ea6971d5aa23d408e11108d52`, with zero restarts, preserved DB backup/rollback tag, and no media/data mutation. Fresh public checks returned health 200 and unauthenticated projects 401. Direct auto-cut defaults remain live (`min_shot_ms=250`, no lead/tail, overlap/silence→wide); existing cuts retain stored params until regenerated.
 
 ## Detailed jobs
 
@@ -22,7 +22,7 @@ Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`,
 - **Depends on:** AI-GPU-1 adapter, versioned artifact slice, synchronized analysis-audio slice, queued worker slice
 - **Goal:** correct the independent artifact-review findings, obtain a clean review, and complete valid V100 ASR/alignment and diarization acceptance without changing production mock defaults prematurely.
 - **Build/fix:** symlink-safe artifact output confinement; strict integer timestamp validation; immutable failure-attempt records; resolved-speaker mapping/reference integrity; host-compatible queued-job harness; TorchCodec/audio-decode remediation for diarization.
-- **Latest automated results:** delayed-review worker/artifact/transcript hardening suite `142 passed`; full mock-backed suite `685 passed, 2 skipped`.
+- **Latest automated results:** delayed-review worker/artifact/transcript hardening suite `142 passed`; deterministic full mock-isolated suite `691 passed, 1 skipped`.
 - **Live evidence:** V100 `/ready` passed for CUDA capability 7.0 and `large-v3` FP16. A consent-cleared hash-bound queued run completed in 20.93 seconds with 241 aligned segments and about 1,422 words; wrong-hash rejection returned HTTP 400. Post-job VRAM snapshot: 6,048 MiB. Runtime identifiers and media fingerprints remain outside Git.
 - **Review gate:** independent artifact status is `PASS`.
 - **Manual/live gates:** valid queued ASR/alignment; selected word timing within one project frame; real diarization/audio decode; overlap/uncertainty behavior; valid peak-VRAM and Ollama/Dots coexistence measurements.
@@ -35,7 +35,7 @@ Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`,
 - **Goal:** resolve anonymous diarizer labels into stable project speaker IDs without allowing transcript/LLM guesses or cross-run label ordering to become identity truth.
 - **Implemented:** strict current-turn evidence references; multi-turn/high-confidence voice threshold; current operator confirmation; current voice revalidation before prior-confirmed reuse; deterministic label-swap handling; audit-only transcript context; fail-closed conflicts; provenance-preserving resolved turns.
 - **Review gate:** independent Phase 4 resolver and WhisperX 3.8.x diarization-import re-review returned `PASS`; no mandatory regressions remain missing.
-- **Latest automated results:** `tests/test_speaker_mapping.py` → `15 passed`; `tests/test_speaker_context.py` → `37 passed`; delayed-review worker/artifact/transcript hardening suite → `142 passed`; full mock-backed suite → `685 passed, 2 skipped`.
+- **Latest automated results:** `tests/test_speaker_mapping.py` → `15 passed`; `tests/test_speaker_context.py` → `37 passed`; delayed-review worker/artifact/transcript hardening suite → `142 passed`; deterministic full mock-isolated suite → `691 passed, 1 skipped`.
 - **Live LLM evidence:** AUTOEDIT's strict context module called local Qwen 3.6 27B over the consent-controlled transcript and returned three anonymous explicit-address candidates at confidence 0.40. It assigned no diarizer IDs and unloaded immediately. Names, excerpts, exact timestamps, and runtime identifiers remain outside Git.
 - **LLM fail-closed correction:** independent review found that initial schema validation did not prove quotes/timestamps came from the transcript. The seam now requires quote and timestamp grounding to the same source segment and rejects thinking traces, malformed/coercive transcript input, partial model responses, non-finite confidence, and assignment fields. The hardened real Qwen rerun passed.
 - **Production blocker:** the deployment does not carry the private Hugging Face authorization/cached gated models or a completed Compose-managed acceptance record. Production remains mock-backed.
@@ -215,14 +215,15 @@ Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`,
 
 ### Job 7.4 — Notes (multi-author)
 
-- **Status:** in_progress — backend CRUD endpoints, notes lane markers, note list panel, and add-note form implemented; manual browser XSS-safe rendering + multi-author gate pending.
+- **Status:** in_progress — backend CRUD and UI are implemented and deployed in `c096e4e`; exact-deployed-commit independent Tester verdict is pending.
 - **Depends on:** 7.0 (display name), 7.2 (timeline)
 - **Spec stage:** 7.4
 - **Goal:** timestamped review notes from named reviewers, renderable on timeline, seekable, XSS-safe.
 - **Build:** `POST /projects/{id}/notes` creates notes with author from session; `GET /projects/{id}/notes` lists sorted by t_ms; `DELETE /projects/{id}/notes/{note_id}` removes; notes included in timeline-state; timeline 4th lane with coloured markers (blue=note, orange=cut_suggestion); click marker → seek; note list panel below angle controls; add-note form captures current playhead; body rendered via `textContent` (XSS-safe).
 - **Required tests:** `tests/test_notes.py` (17 tests) — CRUD, auth, invalid kind, negative t_ms, oversized body, XSS preservation, timeline-state integration.
 - **Latest automated result:** `env -u VIRTUAL_ENV uv run pytest -q` → `321 passed, 2 skipped`.
-- **Manual gates:** two different reviewers' notes appear with correct authors and times; clicking a marker seeks there; injected `<script>` in a note body does not execute; delete removes from both list and lane.
+- **Acceptance evidence:** a strict local Chromium harness run against exact `c096e4e`, with candidate CSS and audio/LUT fixtures served, returned `STAGE_7_4_XSS_GATE_PASS` with zero console/page errors. It passed two-author rendering, XSS-safe text rendering, marker seek, and delete removal from both list and lane; the post-delete screenshot shows one remaining note and one Notes-lane marker. Tester card `t_1a379f2a` ran the same harness against old `master` at `87b9d47`, reproduced a stale delete-marker defect there, and returned `TEST_FAIL`; that verdict is not evidence for deployed `c096e4e`.
+- **Remaining gate:** independent Tester rerun against exact worktree `/opt/data/workspace/AUTOEDIT/.worktrees/autoedit-integrated` / commit `c096e4e`, with normal CSS/audio/LUT fixture routes and zero unexpected console/network errors.
 
 ### Job 7.3 — LUT application
 
@@ -346,28 +347,28 @@ Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`,
 - **Required tests:** correct length, dBFS values, silence floor, hop_ms parameter, JSON shape on disk, auth/404/400.
 - **Latest local result:** `env -u VIRTUAL_ENV uv run pytest -q` → `100 passed, 1 skipped`.
 
-### Job 8.3 — EDL export (markers via LOC lines)
+### Job 8.3 — OTIO fallback / secondary EDL export
 
-- **Status:** in_progress — EDL writer implemented and tested; `POST /projects/{id}/export?format=edl` generates CMX 3600 EDL with `* LOC:` markers.
+- **Status:** in_progress — direct EDL writer is implemented, tested, and Resolve-verified; the source spec's optional OTIO-generated FCPXML/EDL fallback is not implemented.
 - **Depends on:** 8.1, 8.2, 7.4 (notes)
 - **Spec stage:** 8.3
-- **Goal:** deliver CDL clips + note markers into Resolve via EDL `* LOC:` locators (Resolve does not import FCPXML markers).
+- **Goal:** satisfy the source-spec 8.3 fallback contract while retaining the working direct CMX3600 EDL path with `* LOC:` locators.
 - **Build:** `src/autoedit/edl_writer.py` — `write_edl()` generates CMX 3600 EDL with correct timecodes, reel names from angle labels, `* FROM CLIP NAME` comments, and `* LOC:` lines per note marker. Export endpoint supports `?format=edl` parameter.
 - **Required tests:** `tests/test_edl.py` (8 tests) — timecode conversion, basic EDL structure, notes as LOC lines, empty clips, multiple notes per clip, timeline offsets.
 - **Latest automated result:** `env -u VIRTUAL_ENV uv run pytest -q` → `388 passed, 2 skipped`.
-- **Manual gate:** EDL imports into Resolve with clips on correct frames AND markers visible as timeline locators.
+- **Manual gate:** ✅ direct EDL imports into Resolve with clips on correct frames and markers visible as timeline locators. OTIO-generated FCPXML/EDL remains unimplemented and unverified.
 - **Test file:** `test_export.edl` (6 clips, 6 LOC markers).
 
 ### Job 8.1 + 8.2 — CDL validator + FCPXML writer
 
-- **Status:** in_progress — validator and FCPXML writer implemented and tested; `POST /projects/{id}/export` endpoint works; Resolve import manual gate pending.
+- **Status:** done — validator and FCPXML writer are implemented/tested, and the populated Resolve import/cut-frame gate passed.
 - **Depends on:** CDL contract (2.4), 6.1 (cut engine)
 - **Spec stage:** 8.1, 8.2
 - **Goal:** never emit a broken export file; valid CDLs produce valid FCPXML.
 - **Build:** `src/autoedit/cdl_validator.py` — `validate_cdl()` checks required fields, integer types, positive values, frame-exact times, sort order, contiguity (gap/overlap), source file existence, source duration bounds. `src/autoedit/fcpxml_writer.py` — `write_fcpxml()` generates FCPXML 1.9 with rational frame durations, `file://` URLs, asset-clip spine. `POST /projects/{id}/export` validates then writes `edit/export.fcpxml`.
 - **Required tests:** `tests/test_export.py` (24 tests) — frame math, rational formatting, validator (happy path, missing fields, non-integer, sub-frame, gap, overlap, out-of-order, negative, zero, missing src, duration exceeded), FCPXML (XML structure, file URLs, frame boundaries, empty clips).
 - **Latest automated result:** `env -u VIRTUAL_ENV uv run pytest -q` → `345 passed, 2 skipped`.
-- **Manual gate:** generated FCPXML opens populated in DaVinci Resolve (not blank); cuts land on same frames as player preview; source files found/relinkable.
+- **Manual gate:** ✅ generated FCPXML opens populated in DaVinci Resolve; cuts land on the same frames as player preview and source files are found/relinkable.
 - **Test file:** `/workspace/AUTOEDIT/test_export.fcpxml` (25fps, 3 angles, 6 clips, valid CDL).
 
 ### Job 3.2 — Chunked resumable upload
@@ -403,14 +404,14 @@ Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`,
 | 7.0 | Auth gate + reverse proxy | done | 3.1, DB-0 | backend auth/session/rate limits/origin checks; live-verified behind NPM |
 | PROGRESS | Pipeline progress | done | all pipeline stages | project status tracking, progress endpoint, process runner, processing UI, player blocking gate |
 | 3.2 | Chunked resumable upload | done | 3.1 | resumable chunk upload + SHA verification + angles rows |
-| 3.3 | Probe & channel mapping | done | 3.2 | ffprobe metadata, channel mapping + sync nudges |
+| 3.3 | Probe & channel mapping | done | 3.2 | ffprobe metadata, channel mapping; exceptional nudge controls are Advanced-only, never the normal sync path |
 | 3.4 | Channel extraction + audio sync | done | 3.3 | channel WAV extraction, cross-correlation sync |
 | 3.5 | Main proxy normalisation | done | 3.3 | silent 720p short-GOP proxies |
 | 3.5b | Low-bitrate remote proxy tier | done | 3.5 | silent 360p low-bandwidth proxies |
 | 3.6 | Range-request media streaming | done | 3.5, 7.0 | authenticated `206 Partial Content` media streaming |
 | 4.1 | Loudness envelope | done | 3.4 | `audio/loudness.json` with RMS-dB arrays at 20ms hop |
 | 4.2 | Noise floor & threshold | done | 4.1 | floor (10th percentile) + 8dB threshold on `audio_channels` |
-| — | Speaker diarization | done | 3.4 | `audio/diarization.json`; stereo channel mapping + mono mock diarization |
+| — | Speaker diarization baseline | done | 3.4 | `audio/diarization.json`; stereo channel mapping + mono mock baseline; real acceptance remains AI-GPU-1 `in_progress` |
 | 4.3 | Interval construction | done | 4.2 | `speaking_intervals` with hangover merge + min-duration filter |
 | 4.4 | Derived activity timeline | done | 4.3 | contiguous `activity.json` with overlap detection |
 | 4.6 | Program audio mixdown | done | 3.4 | browser-playable `audio/program.m4a` with timing offsets |
@@ -424,17 +425,19 @@ Deployment note: Direct auto-cut defaults are live on Unraid (`min_shot_ms=250`,
 | 7.1 | Player engine | done | 3.5/3.5b/3.6, 4.6, 6.1 | player-state + static shell; browser playback/sync verified |
 | 7.2 | Metadata timeline & navigation | done | 7.1, 5.5, 6.1 | timeline-state endpoint, stacked CDL/topic/waveform lanes, click-to-seek; browser verified |
 | 7.3 | LUT application | done | 7.1 | per-angle .cube upload/parse/WebGL2 with BMD_TITLE + RGBA8; browser verified with real DaVinci .cube |
-| 7.4 | Notes | in_progress | 7.0, 7.2 | multi-author CRUD, timeline markers, list panel, add form, XSS-safe; XSS manual gate pending |
+| 7.4 | Notes | in_progress | 7.0, 7.2 | deployed candidate passes local Chromium behavior harness; exact-commit independent Tester rerun pending |
 | 8.1 | CDL validator | done | CDL contract, 6.1 | strict validator; FCPXML writer verified in Resolve |
 | 8.2 | FCPXML writer | done | 8.1 | rational-frame FCPXML 1.9, asset spine; Resolve verified |
-| 8.3 | EDL export | done | 8.1, 7.4 | CMX3600 EDL with LOC markers (Resolve verified) |
+| 8.3 | OTIO fallback / EDL | in_progress | 8.1, 7.4 | direct CMX3600 EDL with LOC markers is Resolve-verified; OTIO fallback remains open |
 | 9.1 | Natural-language sub-edit requests | done | 6.3 | NL intent parser (deterministic), fuzzy topic matching, API endpoint |
-| 9.2 | YouTube title generator | done | 5.5 | 4-category template-based titles from summary |
+| 9.2 | YouTube title generator | in_progress | 5.5 | 4-category template baseline exists; specified LLM strategies/regeneration/defensive JSON path remains open |
 
 
 ## Remaining project/stage completion gates
 
-- **Stage 7.4:** browser verification that injected `<script>` in note body does not execute, and multi-author notes render with correct display names.
+- **Stage 7.4:** independent exact-`c096e4e` browser acceptance. Do not reuse the old-`master` failure as a deployed-candidate verdict.
+- **Stage 8.3:** optional OTIO fallback remains open; direct EDL is already Resolve-verified.
+- **Stage 9.2:** template baseline is not the specified LLM-backed grouped-strategy/regeneration implementation.
 - **Golden media fixtures:** no real test media in repo; all tests use mocked ffprobe + numpy-generated audio.
 - **LLM integration roadmap (Tier 1-4)** in `AI_HANDOFF.md` — real Whisper transcription, LLM topic segmentation, speaker diarization, conciseness grading not yet wired.
 

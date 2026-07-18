@@ -158,6 +158,24 @@ notes = Table(
     Index("ix_notes_project_t", "project_id", "t_ms"),
 )
 
+speaker_confirmations = Table(
+    "speaker_confirmations", metadata,
+    Column("id", String(26), primary_key=True),
+    Column("project_id", String(26), ForeignKey("projects.id"), nullable=False),
+    Column("diarizer_speaker_id", String(128), nullable=False),
+    Column("speaker_id", String(128), nullable=False),
+    Column("camera_id", String(26), ForeignKey("angles.id"), nullable=False),
+    Column("status", Enum("confirmed", "unresolved", name="speaker_confirmation_status"), nullable=False),
+    Column("operator_id", String(128), nullable=False),
+    Column("confirmed_at", DateTime, nullable=False),
+    Column("source_run_id", String(128), nullable=False),
+    Column("source_artifact_version", String(128), nullable=False),
+    Column("evidence_turn_ids", JSON, nullable=False),
+    Column("version", Integer, nullable=False, server_default="1"),
+    Index("ix_speaker_confirmations_project_label", "project_id", "diarizer_speaker_id"),
+    Index("ix_speaker_confirmations_project_speaker", "project_id", "speaker_id"),
+)
+
 jobs = Table(
     "jobs",
     metadata,

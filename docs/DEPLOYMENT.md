@@ -242,6 +242,59 @@ Do not advertise these as production-complete until implemented and verified:
 - Hardware proxy encoding currently uses VAAPI (`h264_vaapi`). QSV should be called deployed only after a real container encode verifies `h264_qsv`.
 - Audio sync now fails on low-confidence matches instead of silently using zero offset.
 
+## Automated deployment via `autoedit-deploy.sh` (Kanban Publisher)
+
+The canonical mechanism for the Publisher agent to deploy to live Unraid is the
+deterministic script at `scripts/autoedit-deploy.sh`. It replaces ad-hoc inline
+SSH sequences that were fragile (shell-quoting of apostrophes, hardcoded node
+paths, inline DB dumps, cross-container git admin paths).
+
+### What the script handles
+
+1. **Pre-flight**: verifies worktree exists, SSH key is present, commit matches HEAD.
+2. **Backup**: tags the prior image for rollback, archives config files, and dumps
+   the central MySQL database (table-by-table if `--single-transaction` is denied).
+3. **Transfer**: creates a tarball of specified paths and scp's it to Tower.
+4. **Build + deploy**: validates `docker compose config`, then `up -d --build`.
+5. **Health verification**: polls `/health` for up to 120s after recreate.
+6. **Automatic rollback**: if health check fails, restores the prior image tag and recreates.
+7. **Post-deploy checks**: auth gate (401 without cookie), NPM TLS health.
+8. **Structured JSON output**: `DEPLOYED_AND_VERIFIED` / `DRY_RUN_COMPLETE` / `DEPLOY_FAILED`
+   with safety booleans (`mutation_started`, `candidate_live`, `rollback_required`,
+   `production_data_mutated`, `openrouter_used`).
+
+### Usage
+
+```bash
+# Dry run (backup + pre-flight only, no production mutation):
+bash scripts/autoedit-deploy.sh \
+  --worktree /opt/data/workspace/AUTOEDIT/.worktrees/autoedit-integrated \
+  --commit   <FULL_SHA> \
+  --dry-run
+
+# Full deploy:
+bash scripts/autoedit-deploy.sh \
+  --worktree /opt/data/workspace/AUTOEDIT/.worktrees/autoedit-integrated \
+  --commit   <FULL_SHA> \
+  --files    "src/autoedit/web/app.html,src/autoedit/web/app.js"
+```
+
+### Key design decisions
+
+- **No inline single-quoted SSH payloads**: the remote script is scp'd as a file.
+- **DB dump via `docker run --network host mysql:latest mysqldump`**: the autoedit
+  MySQL user connects from 192.168.50.50 (host network), avoiding bridge-network
+  ACL issues. Falls back to table-by-table dump if the user lacks RELOAD privilege.
+- **Secrets stay on Tower**: DB password is extracted from the running container's
+  env inside the remote script — never passed through the worker.
+- **Node path discovery**: uses `command -v node`, never hardcodes `/usr/bin/node`.
+- **Rollback is automatic**: on health-check failure, the script restores the
+  prior image and recreates. The Publisher should NOT retry after a DEPLOY_FAILED.
+
+The Publisher template at `docs/status/templates/publish-card-template.md` is the
+board-card body that tells the Publisher to call this script and report its JSON
+output. The Publisher must not run manual docker/ssh/scp/mysqldump commands.
+
 ## Troubleshooting
 
 **`docker compose config` fails with missing secret errors:** export `SESSION_SECRET`, `OPERATOR_PASSWORD`, and `DB_PASSWORD` from the deployment secret store, then rerun.
