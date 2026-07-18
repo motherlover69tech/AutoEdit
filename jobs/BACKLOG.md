@@ -433,6 +433,13 @@ Deployment note: Publisher card `t_26cf76c6` records `DEPLOYED_AND_VERIFIED` for
 | 9.2 | YouTube title generator | in_progress | 5.5 | 4-category template baseline exists; specified LLM strategies/regeneration/defensive JSON path remains open |
 
 
+## Risk register
+
+All currently-unmet, waived, or partially-met requirements are tracked in
+`docs/status/RISK_REGISTER.md` (the gap/failure list — the inverse of the green status tables
+above). Requirement **B** was waived per owner instruction (2026-07-18, Discord `#general`) and
+is logged there as `WAIVED`.
+
 ## Remaining project/stage completion gates
 
 - **Stage 7.4:** independent exact-`c096e4e` browser acceptance. Do not reuse the old-`master` failure as a deployed-candidate verdict.

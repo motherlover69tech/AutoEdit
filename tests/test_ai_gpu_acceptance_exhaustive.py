@@ -1,175 +1,187 @@
-"""Offline acceptance coverage for every AI-GPU-1 fail-closed contract branch.
+"""Exhaustive offline acceptance coverage for every AI-GPU-1 fail-closed branch.
 
 These tests intentionally use only in-memory evidence, fake clocks, and fake
-subprocess runners.  A real host, network, Docker, GPU, Dots, or Ollama must
+adapters.  A real host, network, Docker, GPU, Dots, Ollama, or Unraid must
 never be needed to collect this module.
+
+It asserts the canonical contract: schema validity, every semantic rule, the
+required exit classes (0/2/3/4/5/6/7), privacy redaction, and that a mock run
+never reports acceptance_eligible/acceptance_pass.
 """
 from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
 
 import pytest
 
 from scripts.ai_gpu_acceptance import (
+    EXIT_ADAPTER_ERROR,
+    EXIT_CLEANUP_ROLLBACK_FAILURE,
+    EXIT_SUCCESS,
+    EXIT_UNAUTHORIZED,
+    EXIT_VALIDATION_FAILURE,
     AcceptanceFailure,
-    AcceptanceHarness,
     MockAdapter,
-
-    Sample,
+    build_mock_evidence,
     discovery,
     main,
-    mock_evidence,
+    mock_run,
     sanitize,
-    validate_acceptance,
-
-    validate_samples,
+    validate_evidence,
+    validate_schema,
 )
 
 
 def valid_evidence() -> dict:
-    return mock_evidence()
+    return build_mock_evidence()
 
 
-def expect_failure(mutator, message: str) -> None:
+def expect_failure(mutator, message: str, *, exit_class: int | None = None) -> None:
     evidence = valid_evidence()
     mutator(evidence)
-    with pytest.raises(AcceptanceFailure, match=message):
-        validate_acceptance(evidence)
+    with pytest.raises(AcceptanceFailure, match=message) as exc:
+        validate_evidence(evidence)
+    if exit_class is not None:
+        assert exc.value.exit_class == exit_class
 
 
-@pytest.mark.parametrize(
-    ("samples", "message"),
-    [
-        ([Sample(0, 100, 10, "baseline"), Sample(501, 100, 10, "baseline")], "gap"),
-        ([Sample(0, 100, 10, "baseline"), Sample(0, 100, 10, "baseline")], "not increasing"),
-        ([Sample(-1, 100, 10, "baseline")], "invalid GPU memory"),
-        ([Sample(0, 100, 101, "baseline")], "invalid GPU memory"),
-        ([Sample(0, 0, 0, "baseline")], "invalid GPU memory"),
-        ([Sample(0, 100, 10, "")], "missing GPU sample phase"),
-    ],
-)
-def test_sampler_rejects_bad_interval_order_and_memory(samples, message):
-    with pytest.raises(AcceptanceFailure, match=message):
-        validate_samples(samples)
+# ---------------------------------------------------------------------------
+# Sampler / clock / phase / process accounting
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("mutate,message", [
+    (lambda e: e["measurement"]["configuration"].__setitem__("nominal_interval_ms", 251), "1..250"),
+    (lambda e: _break_gap(e), "gap"),
+    (lambda e: _break_monotonic(e), "not increasing"),
+    (lambda e: e["measurement"]["samples"].__setitem__(0, {**e["measurement"]["samples"][0], "used_mib": 99999}), "reconcile"),
+    (lambda e: e["measurement"]["samples"][0]["processes"][0].__setitem__("pid", 0), "per-process"),
+    (lambda e: e["measurement"]["samples"][0]["processes"][0].__setitem__("attribution_status", "unknown"), "unknown/unapproved"),
+])
+def test_sampler_and_clock_and_process_fail_closed(mutate, message):
+    expect_failure(mutate, message)
 
 
-def test_config_rejects_nominal_sampling_slower_than_250_ms():
-    with pytest.raises(AcceptanceFailure, match="<= 250"):
-        validate_samples([Sample(0, 100, 10, "baseline")], nominal_interval_ms=251)
+def _break_gap(e):
+    s = e["measurement"]["samples"][5]
+    e["measurement"]["samples"][5] = {**s, "observed_monotonic_ns": s["observed_monotonic_ns"] + 600_000_000}
 
 
-@pytest.mark.parametrize(
-    "mutator,message",
-    [
-        (lambda e: e["phase_markers"].pop("cold"), "missing phase markers"),
-        (lambda e: e["phase_markers"]["cold"].update(start_ms=19_999, end_ms=29_999), "overlap or are out of order"),
-        (lambda e: e["phase_markers"]["resident"].update(start_ms=9_999, end_ms=19_999), "overlap or are out of order"),
-        (lambda e: e["phase_markers"]["baseline"].update(end_ms=9_999), "baseline phase must cover 10 seconds"),
-        (lambda e: e["phase_markers"]["post"].update(start_ms=50_000, end_ms=79_999), "post phase must cover 30 seconds"),
-        (lambda e: e["phase_markers"]["baseline"].update(start_ms="0"), "invalid baseline phase marker"),
-        (lambda e: e["phase_markers"]["post"].update(end_ms=999_999), "outside sample clock"),
-        (lambda e: e["phase_markers"]["active"].update(dots_end_ms=34_000, whisper_end_ms=33_000), "overlap"),
-    ],
-)
-def test_phase_markers_and_overlap_fail_closed(mutator, message):
-    expect_failure(mutator, message)
-
-
-def test_duplicate_phase_marker_key_cannot_be_silently_accepted():
-    # JSON evidence is the interchange boundary: duplicate phase names must be
-    # detected before a Python dict loses the duplicate key.
-    raw = '{"baseline":{"start_ms":0,"end_ms":10000},"baseline":{"start_ms":1,"end_ms":10001}}'
-    pairs = json.loads(raw, object_pairs_hook=list)
-    assert [key for key, _ in pairs].count("baseline") == 2
+def _break_monotonic(e):
+    prev = e["measurement"]["samples"][4]
+    e["measurement"]["samples"][5] = {**e["measurement"]["samples"][5],
+                                      "observed_monotonic_ns": prev["observed_monotonic_ns"] - 1}
 
 
 def test_irreconcilable_wall_and_monotonic_clocks_fail():
-    samples = [
-        Sample(0, 100, 10, "baseline", wall_timestamp_ms=1_000),
-        Sample(250, 100, 10, "baseline", wall_timestamp_ms=2_000),
-    ]
+    evidence = valid_evidence()
+    # Make a wall timestamp diverge far from its monotonic anchor.
+    bad = dict(evidence["measurement"]["samples"][3])
+    bad["wall_utc"] = "2023-11-14T22:13:20.000000000Z"
+    evidence["measurement"]["samples"][3] = bad
     with pytest.raises(AcceptanceFailure, match="reconciliation"):
-        validate_samples(samples)
+        validate_evidence(evidence)
 
 
-def test_missing_or_malformed_per_process_accounting_fails():
-    bad = [
-        {"pid": 0, "name": "worker", "used_mib": 1},
-        {"pid": 4, "name": "", "used_mib": 1},
-        {"pid": 4, "name": "worker", "used_mib": -1},
-        {"pid": 4, "used_mib": 1},
-    ]
-    for process in bad:
-        with pytest.raises(AcceptanceFailure, match="per-process"):
-            validate_samples([Sample(0, 100, 10, "baseline", (process,))])
+@pytest.mark.parametrize("mutate,message", [
+    (lambda e: e["measurement"]["phases"].pop("whisper_cold"), "missing phase"),
+    (lambda e: e["measurement"]["phases"]["baseline"].__setitem__("sequence", 3), "out of sequence"),
+    (lambda e: e["measurement"]["phases"]["baseline"].__setitem__("duration_ms", 999), "baseline"),
+    (lambda e: e["measurement"]["phases"]["dots_resident"].__setitem__("duration_ms", 999), "dots_resident"),
+    (lambda e: e["measurement"]["phases"]["post_workload"].__setitem__("duration_ms", 999), "post_workload"),
+])
+def test_phase_markers_fail_closed(mutate, message):
+    expect_failure(mutate, message)
 
 
-def test_missing_evidence_and_malformed_backend_observation_fail():
-    for key in ("samples", "phase_markers", "health", "outputs", "cleanup", "backends"):
+def test_missing_required_evidence_field_fails_schema():
+    for key in (
+        "schema_version", "evidence_class", "run", "authorization", "redaction",
+        "candidate", "project_context", "discovery", "compose", "measurement",
+        "services", "workloads", "cleanup_and_rollback", "commands", "tests",
+        "requirement_results", "overall",
+    ):
         evidence = valid_evidence()
         evidence.pop(key)
-        with pytest.raises(AcceptanceFailure, match="missing evidence fields"):
-            validate_acceptance(evidence)
-    evidence = valid_evidence()
-    evidence["samples"] = [{"timestamp_ms": "not-a-sample"}]
-    with pytest.raises(AcceptanceFailure, match="malformed GPU observation"):
-        validate_acceptance(evidence)
+        with pytest.raises(AcceptanceFailure):
+            validate_evidence(evidence)
 
 
-@pytest.mark.parametrize(
-    "mutator,message",
-    [
-        (lambda e: e["health"].update(app=False), "health check failed: app"),
-        (lambda e: e["health"].update(dots=False), "health check failed: dots"),
-        (lambda e: e["health"].update(worker_ready=False), "health check failed: worker_ready"),
-        (lambda e: e["health"].update(ollama_unloaded=False), "health check failed: ollama_unloaded"),
-        (lambda e: e["health"].update(restarts=1), "restart"),
-        (lambda e: e["health"].update(readiness_loss=True), "workload health"),
-        (lambda e: e["outputs"].update(dots_first=False), "invalid or incomplete output"),
-        (lambda e: e["outputs"].update(dots_second=False), "invalid or incomplete output"),
-        (lambda e: e["outputs"].update(whisper_cold=False), "invalid or incomplete output"),
-        (lambda e: e["outputs"].update(whisper_repeat=False), "invalid or incomplete output"),
-        (lambda e: e["cleanup"].update(memory_drift_mib=513), "cleanup"),
-        (lambda e: e["cleanup"].update(app_healthy=False), "cleanup"),
-        (lambda e: e["backends"].update(whisper="real"), "mock"),
-        (lambda e: e["backends"].update(diarize="real"), "mock"),
-    ],
-)
-def test_health_outputs_cleanup_and_backend_failures_are_nonzero(mutator, message):
-    expect_failure(mutator, message)
+def test_malformed_evidence_json_fails_cli(tmp_path, capsys):
+    path = tmp_path / "bad.json"
+    path.write_text("{not valid json", encoding="utf-8")
+    assert main(["--validate", str(path)]) == EXIT_ADAPTER_ERROR
+    assert "FAIL" in capsys.readouterr().err
 
 
-def test_harness_failed_adapter_is_not_a_pass():
-    adapter = MockAdapter(checks={name: False for name in ("app", "dots", "worker_ready", "ollama_unloaded", "outputs", "cleanup", "restarts")})
-    with pytest.raises(AcceptanceFailure):
-        AcceptanceHarness(adapter).run()
+# ---------------------------------------------------------------------------
+# Health / output / overlap / VRAM / cleanup
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize("mutate,message", [
+    (lambda e: e["services"]["incidents"].__setitem__("app_health_loss", True), "incident"),
+    (lambda e: e["services"]["incidents"].__setitem__("oom", True), "incident"),
+    (lambda e: e["services"].__setitem__("restart_delta_zero", False), "restart delta"),
+    (lambda e: e["services"].__setitem__("ollama_unloaded_all_phases", False), "Ollama"),
+    (lambda e: e["workloads"]["whisper_outputs"][0].__setitem__("job_done", False), "Whisper"),
+    (lambda e: e["workloads"]["whisper_outputs"][0].__setitem__("input_hash_match", False), "Whisper"),
+    (lambda e: e["workloads"]["whisper_outputs"][0].__setitem__("raw_payload_present", True), "Whisper"),
+    (lambda e: e["workloads"]["dots_outputs"][0].__setitem__("nonempty_bytes", 0), "Dots"),
+    (lambda e: e["workloads"]["dots_outputs"][0].__setitem__("raw_audio_present", True), "Dots"),
+    (lambda e: e["workloads"]["overlaps"][0].__setitem__("overlap_ms", 1000), "overlap"),
+    (lambda e: e["measurement"]["vram_summary"].__setitem__("minimum_free_mib", 1), "VRAM"),
+    (lambda e: e["measurement"]["vram_summary"].__setitem__("unknown_process_count", 2), "peak"),
+    (lambda e: e["cleanup_and_rollback"].__setitem__("adjusted_drift_mib", 513), "drift"),
+    (lambda e: e["cleanup_and_rollback"].__setitem__("app_healthy_after_cleanup", False), "app not healthy"),
+    (lambda e: e["cleanup_and_rollback"].__setitem__(
+        "production_backends_after_cleanup", {"whisper": "real", "diarize": "mock"}), "mock"),
+])
+def test_health_output_overlap_vram_cleanup_fail_closed(mutate, message):
+    expect_failure(mutate, message)
 
 
-def test_authorization_and_disabled_live_mode_exit_nonzero(capsys, monkeypatch):
-    monkeypatch.delenv("PETER_AI_GPU_ACCEPTANCE", raising=False)
-    assert main(["--execute"]) != 0
-    assert "authorization" in capsys.readouterr().err
-    monkeypatch.setenv("PETER_AI_GPU_ACCEPTANCE", "1")
-    assert main(["--execute"]) != 0
-    assert "disabled" in capsys.readouterr().err
+def test_cleanup_drift_uses_rollback_exit_class():
+    expect_failure(
+        lambda e: e["cleanup_and_rollback"].__setitem__("adjusted_drift_mib", 600),
+        "drift", exit_class=EXIT_CLEANUP_ROLLBACK_FAILURE,
+    )
+
+
+def test_unapproved_cleanup_mutation_uses_rollback_exit_class():
+    expect_failure(
+        lambda e: e["cleanup_and_rollback"].__setitem__("unapproved_resource_mutation_attempted", True),
+        "unapproved", exit_class=EXIT_CLEANUP_ROLLBACK_FAILURE,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Authorization / discovery / execute modes
+# ---------------------------------------------------------------------------
+def test_authorization_missing_blocks_execute():
+    assert main(["--execute"]) == EXIT_UNAUTHORIZED
+
+
+def test_execute_never_runs_without_full_authorization():
+    class LiveLikeAdapter(MockAdapter):
+        def submit_workload(self, kind):
+            raise AcceptanceFailure("no live adapter", exit_class=EXIT_UNAUTHORIZED)
+
+    assert main(["--execute"], adapter=LiveLikeAdapter()) == EXIT_UNAUTHORIZED
 
 
 def test_discovery_allows_only_read_only_commands_and_redacts_secrets():
     seen = []
 
-    def fake_run(command):
-        seen.append(tuple(command))
-        assert tuple(command) in {
-            ("nvidia-smi", "--query-gpu=name,memory.total,memory.used", "--format=csv,noheader,nounits"),
-            ("docker", "compose", "ps", "--format", "json"),
-        }
-        if command[0] == "nvidia-smi":
-            return "Tesla V100,32768,12000,/private/Peter.mp4 transcript=secret token=abc"
-        return '[{"State":"running","Name":"autoedit","password":"dont-print"}]'
+    class Probe(MockAdapter):
+        def run_read_only(self, command, timeout_s=10):
+            seen.append(tuple(command))
+            assert tuple(command) in {
+                ("nvidia-smi", "--query-gpu=name,memory.total,memory.used", "--format=csv,noheader,nounits"),
+                ("docker", "compose", "ps", "--format", "json"),
+            }
+            if command[0] == "nvidia-smi":
+                return "Tesla V100,32768,12000,/private/Peter.mp4 transcript=secret token=abc"
+            return '[{"State":"running","Name":"autoedit","password":"dont-print"}]'
 
-    result = discovery(fake_run)
+    result = discovery(Probe())
     encoded = json.dumps(result)
     assert len(seen) == 2
     for secret in ("/private/Peter.mp4", "secret", "abc", "dont-print", "Peter"):
@@ -177,46 +189,59 @@ def test_discovery_allows_only_read_only_commands_and_redacts_secrets():
     assert result["compose"] == {"service_count": 1, "states": ["running"]}
 
 
-def test_discovery_timeout_or_subprocess_error_is_failure():
-    def failing_run(_command):
-        raise subprocess.TimeoutExpired("nvidia-smi", 10)
+def test_discovery_timeout_is_unavailable():
+    class Failing(MockAdapter):
+        def run_read_only(self, command, timeout_s=10):
+            raise subprocess.TimeoutExpired("nvidia-smi", 10)
 
-    with pytest.raises(AcceptanceFailure, match="discovery failed"):
-        discovery(failing_run)
+    with pytest.raises(AcceptanceFailure) as exc:
+        discovery(Failing())
+    assert exc.value.exit_class == 3  # unavailable
+    assert main(["--discover"], adapter=Failing()) == 3
 
 
-def test_valid_mock_path_is_deterministic_and_sanitized():
-    first = AcceptanceHarness().run()
-    second = AcceptanceHarness().run()
+def test_discovery_allowlists_single_token_host_labels():
+    """Host labels must not become durable evidence when not name-like."""
+    class Hostile(MockAdapter):
+        def run_read_only(self, command, timeout_s=10):
+            if command[0] == "nvidia-smi":
+                return "Alice,32768,12000"
+            return '[{"State":"Alice","Name":"Alice"}]'
+
+    result = discovery(Hostile())
+    assert result["gpu"]["model"] == "unknown"
+    assert result["compose"]["states"] == ["unknown"]
+    assert "Alice" not in json.dumps(result)
+
+
+def test_local_readonly_discovery_fails_unavailable_when_tool_absent():
+    # The CLI default adapter shells out to the allowlisted read-only commands
+    # and must fail closed (unavailable) when the host tooling is absent, never
+    # faking a pass or mutating anything.
+    import shutil
+    if shutil.which("nvidia-smi") is None:
+        assert main(["--discover"]) == 3
+    else:  # pragma: no cover - not present on this CI host
+        assert main(["--discover"]) == EXIT_SUCCESS
+
+
+# ---------------------------------------------------------------------------
+# Mock determinism / schema identity / redaction
+# ---------------------------------------------------------------------------
+def test_mock_fixture_is_deterministic_canonical_and_not_acceptance():
+    first = mock_run()
+    second = mock_run()
     assert first == second
     assert first["verdict"] == "PASS"
     encoded = json.dumps(first)
     assert "[REDACTED]" not in encoded
-    assert "password" not in encoded.lower()
+    # Mock is never live acceptance.
+    assert first["acceptance_eligible"] is False
+    assert first["acceptance_pass"] is False
 
 
-def test_mock_fixture_has_the_required_evidence_schema_shape():
-    fixture = valid_evidence()
-    assert set(("samples", "phase_markers", "health", "outputs", "cleanup", "backends")) <= set(fixture)
-    assert len(fixture["samples"]) >= 2
-    for sample in fixture["samples"]:
-        assert {"timestamp_ms", "total_mib", "used_mib", "phase"} <= set(sample)
-        assert isinstance(sample["timestamp_ms"], int)
-        assert isinstance(sample["total_mib"], int)
-        assert isinstance(sample["used_mib"], int)
-        assert isinstance(sample["phase"], str)
-    assert fixture["backends"] == {"whisper": "mock", "diarize": "mock"}
-
-
-def test_evidence_file_validation_has_nonzero_exit_for_invalid_input(tmp_path: Path, capsys):
-    evidence = valid_evidence()
-    evidence["health"]["dots"] = False
-    path = tmp_path / "evidence.json"
-    path.write_text(json.dumps(evidence), encoding="utf-8")
-    assert main(["--evidence", str(path)]) != 0
-    diagnostic = capsys.readouterr().err
-    assert '"verdict": "FAIL"' in diagnostic
-    assert "dots" in diagnostic
+def test_mock_evidence_conforms_to_canonical_schema():
+    validate_schema(valid_evidence())
 
 
 def test_sanitize_recurses_without_echoing_secret_like_input_or_output():
@@ -225,3 +250,32 @@ def test_sanitize_recurses_without_echoing_secret_like_input_or_output():
     assert "TOPSECRET" not in encoded
     assert "/home/private.mov" not in encoded
     assert "password" not in encoded
+
+
+def test_evidence_file_validation_has_nonzero_exit_for_invalid_input(tmp_path, capsys):
+    evidence = valid_evidence()
+    evidence["measurement"]["vram_summary"]["minimum_free_mib"] = 1
+    path = tmp_path / "evidence.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    assert main(["--validate", str(path)]) == EXIT_VALIDATION_FAILURE
+    diagnostic = capsys.readouterr().err
+    assert "VRAM" in diagnostic
+    assert "exit_class" in diagnostic
+
+
+def test_valid_mock_cli_path_exits_zero():
+    assert main(["--mock"]) == EXIT_SUCCESS
+
+
+def test_plan_cli_proves_canonical_schema_and_exits_zero():
+    assert main(["--plan"]) == EXIT_SUCCESS
+
+
+def test_discovery_cli_exits_zero_when_tooling_present():
+    class Present(MockAdapter):
+        def run_read_only(self, command, timeout_s=10):
+            if command[0] == "nvidia-smi":
+                return "Tesla-V100,32768,12000"
+            return '[{"State":"running","Name":"autoedit"}]'
+
+    assert main(["--discover"], adapter=Present()) == EXIT_SUCCESS
