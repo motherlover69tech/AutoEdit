@@ -33,7 +33,8 @@ from autoedit.auth import (
     verify_password,
 )
 from autoedit.ai.speaker_confirmation import ArtifactValidationError, artifact_version, load_artifact, snippets, validate_confirmation_payload
-from autoedit.ai.activity_from_turns import activity_from_turns
+from autoedit.ai.activity_from_turns import ArtifactImportError, activity_from_turns, import_artifact
+from autoedit.ai.artifacts import AIArtifactStore
 from autoedit.activity import compute_activity_timeline
 from autoedit.audio import SyncQualityError, compute_sync_offsets, extract_channel, extract_guide_track
 from autoedit.conciseness import grade_conciseness
@@ -2773,7 +2774,26 @@ def create_app(
         except ArtifactValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if ai_artifact is not None:
+            try:
+                ai_artifact = import_artifact(
+                    ai_artifact, store=AIArtifactStore(project_dir)
+                ).artifact.model_dump(mode="json")
+            except ArtifactImportError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             current_version = artifact_version(ai_artifact)
+            gate_one_path = project_dir / "audio" / "ai" / "v1" / "word-timing-review.json"
+            try:
+                gate_one = json.loads(gate_one_path.read_text(encoding="utf-8"))
+            except (FileNotFoundError, OSError, json.JSONDecodeError) as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Gate 1 word-timing acceptance is required before generating the AI cut",
+                ) from exc
+            if gate_one.get("status") != "PASS" or gate_one.get("artifact_version") != current_version:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Gate 1 word-timing acceptance is required for the current AI artifact",
+                )
             with Session(app_engine) as session:
                 confirmation_rows = session.execute(
                     select(speaker_confirmations).where(
@@ -3017,12 +3037,19 @@ def create_app(
         if ai_artifact is not None:
             cdl["analysis_artifact_version"] = artifact_version(ai_artifact)
 
-        # Write edit/cdl.json
+        # VAD remains the selected rough cut. An AI candidate is persisted as
+        # a separate versioned cut and must not replace player selection.
         edit_dir = project_dir / "edit"
         edit_dir.mkdir(parents=True, exist_ok=True)
-        tmp_path = edit_dir / "cdl.json.tmp"
+        cdl_path = (
+            edit_dir / f"cdl_whisperx_{cdl['analysis_artifact_version']}.json"
+            if ai_artifact is not None
+            else edit_dir / "cdl.json"
+        )
+        prior_cdl = cdl_path.read_bytes() if cdl_path.is_file() else None
+        tmp_path = cdl_path.with_suffix(cdl_path.suffix + ".tmp")
         tmp_path.write_text(json.dumps(cdl, indent=2) + "\n")
-        tmp_path.replace(edit_dir / "cdl.json")
+        tmp_path.replace(cdl_path)
 
         # Persist to cuts table
         effective_params = dict(DEFAULT_CUT_PARAMS)
@@ -3032,17 +3059,25 @@ def create_app(
         cut_name = payload.name if payload else "Rough cut"
         cut_id = new_ulid()
         with Session(app_engine) as session:
-            session.execute(
-                cuts.insert().values(
-                    id=cut_id,
-                    project_id=project_id,
-                    name=cut_name,
-                    kind="rough",
-                    params_json=effective_params,
-                    cdl_json=cdl,
+            try:
+                session.execute(
+                    cuts.insert().values(
+                        id=cut_id,
+                        project_id=project_id,
+                        name=cut_name,
+                        kind="ai" if ai_artifact is not None else "rough",
+                        params_json=effective_params,
+                        cdl_json=cdl,
+                    )
                 )
-            )
-            session.commit()
+                session.commit()
+            except Exception:
+                session.rollback()
+                if prior_cdl is None:
+                    cdl_path.unlink(missing_ok=True)
+                else:
+                    cdl_path.write_bytes(prior_cdl)
+                raise
 
         _check_and_update_status(project_id)
         return cdl

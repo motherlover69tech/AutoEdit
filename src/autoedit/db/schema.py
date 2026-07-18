@@ -137,7 +137,7 @@ cuts = Table(
     Column("id", String(26), primary_key=True),
     Column("project_id", String(26), ForeignKey("projects.id"), nullable=False),
     Column("name", String(255), nullable=False),
-    Column("kind", Enum("rough", "themed", "social", "manual", name="cut_kind"), nullable=False),
+    Column("kind", Enum("rough", "ai", "themed", "social", "manual", name="cut_kind"), nullable=False),
     Column("params_json", JSON, nullable=False),
     Column("cdl_json", JSON, nullable=False),
     Column("created_at", DateTime, nullable=False, server_default=func.now()),

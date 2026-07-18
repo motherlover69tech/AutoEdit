@@ -12,7 +12,8 @@ from autoedit.cut_engine import generate_cdl
 def test_unresolved_turn_is_explicit_safe_wide_and_contiguous():
     activity = activity_from_turns(
         [
-            {"start_ms": 0, "end_ms": 1000, "speaker_id": "alice", "confidence": 0.9},
+            {"start_ms": 0, "end_ms": 1000, "speaker_id": "alice", "confidence": 0.9,
+             "mapping_status": "confirmed", "provenance": "confirmed_mapping"},
             {"start_ms": 1000, "end_ms": 2000, "speaker_id": None, "confidence": None},
         ],
         timeline_end_ms=2000,
@@ -27,8 +28,10 @@ def test_unresolved_turn_is_explicit_safe_wide_and_contiguous():
 def test_overlap_is_safe_wide_even_when_below_minimum_shot():
     activity = activity_from_turns(
         [
-            {"start_ms": 0, "end_ms": 1000, "speaker_id": "alice", "confidence": 1.0},
-            {"start_ms": 350, "end_ms": 650, "speaker_id": "bob", "confidence": 1.0},
+            {"start_ms": 0, "end_ms": 1000, "speaker_id": "alice", "confidence": 1.0,
+             "mapping_status": "confirmed", "provenance": "confirmed_mapping"},
+            {"start_ms": 350, "end_ms": 650, "speaker_id": "bob", "confidence": 1.0,
+             "mapping_status": "confirmed", "provenance": "confirmed_mapping"},
         ],
         timeline_end_ms=1000,
     )
@@ -40,9 +43,12 @@ def test_overlap_is_safe_wide_even_when_below_minimum_shot():
 def test_low_confidence_is_not_collapsed_into_a_closeup():
     activity = activity_from_turns(
         [
-            {"start_ms": 0, "end_ms": 1000, "speaker_id": "alice", "confidence": 0.95},
-            {"start_ms": 1000, "end_ms": 1100, "speaker_id": "bob", "confidence": 0.1},
-            {"start_ms": 1100, "end_ms": 2000, "speaker_id": "alice", "confidence": 0.95},
+            {"start_ms": 0, "end_ms": 1000, "speaker_id": "alice", "confidence": 0.95,
+             "mapping_status": "confirmed", "provenance": "confirmed_mapping"},
+            {"start_ms": 1000, "end_ms": 1100, "speaker_id": "bob", "confidence": 0.1,
+             "mapping_status": "confirmed", "provenance": "confirmed_mapping"},
+            {"start_ms": 1100, "end_ms": 2000, "speaker_id": "alice", "confidence": 0.95,
+             "mapping_status": "confirmed", "provenance": "confirmed_mapping"},
         ],
         timeline_end_ms=2000,
         confidence_threshold=0.5,
@@ -54,7 +60,8 @@ def test_low_confidence_is_not_collapsed_into_a_closeup():
 
 def test_confirmed_activity_preserves_worker_confidence():
     activity = activity_from_turns(
-        [{"start_ms": 0, "end_ms": 1000, "speaker_id": "alice", "confidence": 0.6}],
+        [{"start_ms": 0, "end_ms": 1000, "speaker_id": "alice", "confidence": 0.6,
+          "mapping_status": "confirmed", "provenance": "confirmed_mapping"}],
         timeline_end_ms=1000,
         confidence_threshold=0.5,
     )
@@ -124,3 +131,43 @@ def test_gpu_sampler_rejects_large_gaps():
         assert "gap" in str(exc)
     else:
         raise AssertionError("expected sampler gap failure")
+
+
+def test_safe_wide_cannot_be_overridden_by_hold_policy():
+    activity = [{
+        "start_ms": 0, "end_ms": 120, "active": [], "safe_wide": True,
+        "source": "whisperx", "mapping_status": "unresolved", "reason": "unresolved:wide",
+    }]
+    cdl = generate_cdl(
+        activity, {}, {}, wide_angle_id="wide",
+        params={"overlap_to_wide": False, "min_shot_ms": 0},
+    )
+    assert cdl["clips"][0]["angle_id"] == "wide"
+
+
+def test_missing_confirmation_metadata_is_not_closeup_authority():
+    activity = activity_from_turns(
+        [{"start_ms": 0, "end_ms": 1000, "speaker_id": "alice", "confidence": 0.9}],
+        timeline_end_ms=1000,
+    )
+    assert activity[0]["active"] == []
+    assert activity[0]["mapping_status"] == "unresolved"
+
+
+def test_confidence_boundary_is_preserved_when_projecting():
+    activity = activity_from_turns(
+        [
+            {"start_ms": 0, "end_ms": 500, "speaker_id": "alice", "confidence": 0.9,
+             "mapping_status": "confirmed", "provenance": "confirmed_mapping"},
+            {"start_ms": 500, "end_ms": 1000, "speaker_id": "alice", "confidence": 0.6,
+             "mapping_status": "confirmed", "provenance": "confirmed_mapping"},
+        ], timeline_end_ms=1000, confidence_threshold=0.5,
+    )
+    assert [(item["start_ms"], item["end_ms"], item["confidence"]) for item in activity] == [
+        (0, 500, 0.9), (500, 1000, 0.6)
+    ]
+
+
+def test_empty_or_unverified_artifact_import_fails_closed():
+    with pytest.raises(ArtifactImportError, match="invalid AI artifact|non-empty"):
+        import_artifact({"schema_version": "1.0", "run_id": "run-empty"})

@@ -77,9 +77,10 @@ def activity_from_turns(
         # marks it as confirmed (the API passes only confirmed rows here).
         provenance = value.get("provenance")
         mapping_status = value.get("mapping_status")
-        authoritative = provenance in {None, "confirmed_mapping", "prior_confirmed_mapping"}
-        if mapping_status is not None:
-            authoritative = authoritative and mapping_status == "confirmed"
+        authoritative = (
+            provenance in {"confirmed_mapping", "prior_confirmed_mapping"}
+            and mapping_status == "confirmed"
+        )
         off_camera = bool(value.get("off_camera") or value.get("uncertain_camera"))
         known = authoritative and not off_camera and bool(speaker) and (confidence is None or confidence >= confidence_threshold)
         reason_override = "off_camera:wide" if off_camera else None
@@ -146,12 +147,17 @@ def import_artifact(artifact: Any, *, store: Any | None = None) -> ArtifactImpor
         validated = AIResultArtifact.model_validate(artifact)
     except Exception as exc:
         raise ArtifactImportError(f"invalid AI artifact: {exc}") from exc
-    if store is not None:
-        try:
-            store._verify_inputs(validated)
-        except Exception as exc:
-            raise ArtifactImportError(f"source-bound artifact verification failed: {exc}") from exc
-    return ArtifactImportResult(validated, store is not None)
+    if not validated.segments or not any(segment.words for segment in validated.segments):
+        raise ArtifactImportError("artifact must contain non-empty aligned words")
+    if not validated.diarization_turns:
+        raise ArtifactImportError("artifact must contain non-empty diarization turns")
+    if store is None:
+        raise ArtifactImportError("source-bound artifact verification is required")
+    try:
+        store._verify_inputs(validated)
+    except Exception as exc:
+        raise ArtifactImportError(f"source-bound artifact verification failed: {exc}") from exc
+    return ArtifactImportResult(validated, True)
 
 
 def _merge(segments: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -163,6 +169,7 @@ def _merge(segments: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             and merged[-1]["active"] == segment["active"]
             and merged[-1]["mapping_status"] == segment["mapping_status"]
             and merged[-1].get("reason") == segment.get("reason")
+            and merged[-1].get("confidence") == segment.get("confidence")
         ):
             merged[-1]["end_ms"] = segment["end_ms"]
         else:

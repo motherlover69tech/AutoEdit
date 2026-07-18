@@ -528,7 +528,10 @@ def generate_cdl(
         t_start = it["start_ms"]
         t_end = it["end_ms"]
 
-        if it["kind"] == "solo":
+        if it.get("safe_wide"):
+            angle_id = wide_angle_id
+            reason = it.get("reason") or "unresolved:wide"
+        elif it["kind"] == "solo":
             angle_id = speaker_to_angle.get(it["speaker"])
             if angle_id is None:
                 angle_id = wide_angle_id
