@@ -134,6 +134,7 @@ def _build_confirmed_ai_project(tmp_path: Path):
 
 def test_ai_cut_is_atomic_on_db_failure(tmp_path: Path):
     engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    _seed_prior_vad_cut(engine, tmp_path, pid)
     # In production the DB error becomes a 500 via FastAPI's handler; mirror
     # that here so we can assert on the response and the rolled-back files.
     fail_client = TestClient(
@@ -160,11 +161,79 @@ def test_ai_cut_is_atomic_on_db_failure(tmp_path: Path):
     assert not cdl_path.exists(), "CDL file must not be written on DB failure"
     with Session(engine) as session:
         rows = session.execute(cuts.select().where(cuts.c.project_id == pid)).all()
-    assert len(rows) == 0, "no cut row may survive a failed transaction"
+    assert [(row._mapping["kind"], row._mapping["name"]) for row in rows] == [("rough", "Prior VAD")]
+
+
+def _seed_prior_vad_cut(engine, tmp_path: Path, pid: str) -> None:
+    prior_cdl = {"version": 1, "analysis_source": "vad", "clips": [{"angle_id": "prior", "timeline_in_ms": 0, "src_in_ms": 0, "dur_ms": 5000}]}
+    edit_dir = tmp_path / pid / "edit"
+    edit_dir.mkdir(parents=True, exist_ok=True)
+    (edit_dir / "cdl.json").write_text(json.dumps(prior_cdl) + "\n")
+    with Session(engine) as session:
+        session.execute(cuts.insert().values(id=new_ulid(), project_id=pid, name="Prior VAD", kind="rough", params_json={"profile": "vad"}, cdl_json=prior_cdl))
+        session.commit()
+
+
+def _assert_prior_vad_preserved(engine, client, tmp_path: Path, pid: str) -> None:
+    cdl_path = tmp_path / pid / "edit" / "cdl.json"
+    assert json.loads(cdl_path.read_text())["analysis_source"] == "vad"
+    with Session(engine) as session:
+        rows = session.execute(cuts.select().where(cuts.c.project_id == pid).order_by(cuts.c.kind)).all()
+    assert [(row._mapping["kind"], row._mapping["name"]) for row in rows] == [("rough", "Prior VAD")]
+
+
+def test_ai_cut_candidate_cdl_write_failure_preserves_prior_vad(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    _seed_prior_vad_cut(engine, tmp_path, pid)
+    original = Path.write_text
+
+    def fail_candidate(path: Path, data: str, *args, **kwargs):
+        if "cdl_whisperx" in path.name:
+            raise OSError("simulated candidate CDL write failure")
+        return original(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_candidate)
+    response = TestClient(client.app, raise_server_exceptions=False).post(f"/projects/{pid}/cut", json={})
+    assert response.status_code >= 500
+    _assert_prior_vad_preserved(engine, client, tmp_path, pid)
+
+
+def test_ai_cut_activity_write_failure_preserves_prior_vad(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    _seed_prior_vad_cut(engine, tmp_path, pid)
+    original = Path.write_text
+
+    def fail_activity(path: Path, data: str, *args, **kwargs):
+        if "activity-whisperx" in path.name:
+            raise OSError("simulated activity write failure")
+        return original(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_activity)
+    response = TestClient(client.app, raise_server_exceptions=False).post(f"/projects/{pid}/cut", json={})
+    assert response.status_code >= 500
+    _assert_prior_vad_preserved(engine, client, tmp_path, pid)
+
+
+def test_ai_cut_replace_failure_preserves_prior_vad(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    _seed_prior_vad_cut(engine, tmp_path, pid)
+    original = Path.replace
+
+    def fail_activity_replace(path: Path, target: str | Path, *args, **kwargs):
+        if "activity-whisperx" in str(target):
+            raise OSError("simulated activity replace failure")
+        return original(path, target, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "replace", fail_activity_replace)
+    response = TestClient(client.app, raise_server_exceptions=False).post(f"/projects/{pid}/cut", json={})
+    assert response.status_code >= 500
+    _assert_prior_vad_preserved(engine, client, tmp_path, pid)
 
 
 def test_ai_cut_persists_all_sides_on_success(tmp_path: Path):
     engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    _seed_prior_vad_cut(engine, tmp_path, pid)
+    prior_bytes = (tmp_path / pid / "edit" / "cdl.json").read_bytes()
     response = client.post(f"/projects/{pid}/cut", json={})
     assert response.status_code == 200, response.text
     cdl = response.json()
@@ -174,10 +243,10 @@ def test_ai_cut_persists_all_sides_on_success(tmp_path: Path):
     cdl_path = tmp_path / pid / "edit" / "cdl_whisperx_run-one.json"
     assert activity_path.is_file(), "activity artifact must be published on success"
     assert cdl_path.is_file(), "CDL file must be published on success"
+    assert (tmp_path / pid / "edit" / "cdl.json").read_bytes() == prior_bytes
     with Session(engine) as session:
         rows = session.execute(cuts.select().where(cuts.c.project_id == pid)).all()
-    assert len(rows) == 1, "exactly one cut row must be persisted"
-    assert rows[0]._mapping["kind"] == "ai"
+    assert {row._mapping["kind"] for row in rows} == {"rough", "ai"}
 
 
 def test_confirmed_solo_projection_selects_mapped_close_camera(tmp_path: Path):

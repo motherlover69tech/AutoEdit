@@ -3068,10 +3068,11 @@ def create_app(
         )
         prior_cdl = cdl_path.read_bytes() if cdl_path.is_file() else None
 
-        # Round-2 repair: the AI activity artifact, the CDL file, and the DB
-        # cut row are written as ONE atomic operation.  Any failure rolls every
-        # side back to its prior state, so no partial artifact/cut pair can
-        # survive (closes the non-transactional cut-selection finding).
+        # The AI activity artifact, CDL file, and DB cut row are one publication
+        # unit.  Stage both files first, keep the DB transaction open while the
+        # staged files are promoted, and commit only after both promotions.  If
+        # either write/replace or the DB commit fails, restore every prior byte
+        # and leave the rough cut (and therefore player selection) untouched.
         if ai_artifact is not None:
             activity_dir = project_dir / "audio" / "ai" / "v1"
             activity_dir.mkdir(parents=True, exist_ok=True)
@@ -3081,16 +3082,33 @@ def create_app(
             prior_activity = None
             activity_path = None
 
-        # Persist to cuts table, with the on-disk artifacts committed only
-        # after the DB row is durable and rolled back if it is not.
         effective_params = dict(DEFAULT_CUT_PARAMS)
         if cut_params:
             effective_params.update(cut_params)
 
         cut_name = payload.name if payload else "Rough cut"
         cut_id = new_ulid()
+        tmp_paths: list[Path] = []
+
+        def _restore(path: Path, prior: bytes | None) -> None:
+            if prior is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(prior)
+
         with Session(app_engine) as session:
             try:
+                # Write the candidate bytes before touching the DB.  A failed
+                # candidate write therefore cannot create an orphan DB row.
+                tmp_cdl = cdl_path.with_suffix(cdl_path.suffix + ".tmp")
+                tmp_cdl.write_text(json.dumps(cdl, indent=2) + "\n")
+                tmp_paths.append(tmp_cdl)
+                tmp_activity = None
+                if activity_path is not None:
+                    tmp_activity = activity_path.with_suffix(activity_path.suffix + ".tmp")
+                    tmp_activity.write_text(json.dumps(activity, indent=2) + "\n")
+                    tmp_paths.append(tmp_activity)
+
                 session.execute(
                     cuts.insert().values(
                         id=cut_id,
@@ -3101,30 +3119,22 @@ def create_app(
                         cdl_json=cdl,
                     )
                 )
+                # Keep the insert uncommitted until both artifact replacements
+                # succeed.  This also makes a commit failure recoverable.
+                tmp_cdl.replace(cdl_path)
+                if tmp_activity is not None:
+                    assert activity_path is not None
+                    tmp_activity.replace(activity_path)
                 session.commit()
             except Exception:
                 session.rollback()
-                # Roll back every on-disk artifact to its prior state.
-                if prior_cdl is None:
-                    cdl_path.unlink(missing_ok=True)
-                else:
-                    cdl_path.write_bytes(prior_cdl)
+                _restore(cdl_path, prior_cdl)
                 if activity_path is not None:
-                    if prior_activity is None:
-                        activity_path.unlink(missing_ok=True)
-                    else:
-                        activity_path.write_bytes(prior_activity)
+                    _restore(activity_path, prior_activity)
                 raise
-            else:
-                # DB row is durable: now publish the artifacts atomically
-                # (tmp + replace is itself atomic per file).
-                tmp_path = cdl_path.with_suffix(cdl_path.suffix + ".tmp")
-                tmp_path.write_text(json.dumps(cdl, indent=2) + "\n")
-                tmp_path.replace(cdl_path)
-                if activity_path is not None:
-                    tmp_activity = activity_path.with_suffix(activity_path.suffix + ".tmp")
-                    tmp_activity.write_text(json.dumps(activity, indent=2) + "\n")
-                    tmp_activity.replace(activity_path)
+            finally:
+                for tmp_path in tmp_paths:
+                    tmp_path.unlink(missing_ok=True)
 
         _check_and_update_status(project_id)
         return cdl
