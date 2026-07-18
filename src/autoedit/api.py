@@ -2832,10 +2832,10 @@ def create_app(
                 raise HTTPException(status_code=422, detail=f"invalid AI activity artifact: {exc}") from exc
             activity = {"timeline": timeline, "total_duration_ms": int(ai_artifact["timeline_end_ms"]),
                         "source": "whisperx", "artifact_version": current_version}
-            (project_dir / "audio" / "ai" / "v1").mkdir(parents=True, exist_ok=True)
-            tmp_activity = project_dir / "audio" / "ai" / "v1" / "activity-whisperx.json.tmp"
-            tmp_activity.write_text(json.dumps(activity, indent=2) + "\n")
-            tmp_activity.replace(project_dir / "audio" / "ai" / "v1" / "activity-whisperx.json")
+            # NOTE: the activity artifact is NOT written to disk here.  The
+            # round-2 repair makes the activity file, CDL file, and DB cut row
+            # a single atomic operation (see the persistence block below) so a
+            # downstream failure cannot leave a replaced activity with no cut.
 
         # Build sync offsets in the same timeline basis as activity.json. The
         # activity timeline comes from extracted speaker channel WAVs, so its
@@ -3047,11 +3047,22 @@ def create_app(
             else edit_dir / "cdl.json"
         )
         prior_cdl = cdl_path.read_bytes() if cdl_path.is_file() else None
-        tmp_path = cdl_path.with_suffix(cdl_path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(cdl, indent=2) + "\n")
-        tmp_path.replace(cdl_path)
 
-        # Persist to cuts table
+        # Round-2 repair: the AI activity artifact, the CDL file, and the DB
+        # cut row are written as ONE atomic operation.  Any failure rolls every
+        # side back to its prior state, so no partial artifact/cut pair can
+        # survive (closes the non-transactional cut-selection finding).
+        if ai_artifact is not None:
+            activity_dir = project_dir / "audio" / "ai" / "v1"
+            activity_dir.mkdir(parents=True, exist_ok=True)
+            activity_path = activity_dir / "activity-whisperx.json"
+            prior_activity = activity_path.read_bytes() if activity_path.is_file() else None
+        else:
+            prior_activity = None
+            activity_path = None
+
+        # Persist to cuts table, with the on-disk artifacts committed only
+        # after the DB row is durable and rolled back if it is not.
         effective_params = dict(DEFAULT_CUT_PARAMS)
         if cut_params:
             effective_params.update(cut_params)
@@ -3073,11 +3084,27 @@ def create_app(
                 session.commit()
             except Exception:
                 session.rollback()
+                # Roll back every on-disk artifact to its prior state.
                 if prior_cdl is None:
                     cdl_path.unlink(missing_ok=True)
                 else:
                     cdl_path.write_bytes(prior_cdl)
+                if activity_path is not None:
+                    if prior_activity is None:
+                        activity_path.unlink(missing_ok=True)
+                    else:
+                        activity_path.write_bytes(prior_activity)
                 raise
+            else:
+                # DB row is durable: now publish the artifacts atomically
+                # (tmp + replace is itself atomic per file).
+                tmp_path = cdl_path.with_suffix(cdl_path.suffix + ".tmp")
+                tmp_path.write_text(json.dumps(cdl, indent=2) + "\n")
+                tmp_path.replace(cdl_path)
+                if activity_path is not None:
+                    tmp_activity = activity_path.with_suffix(activity_path.suffix + ".tmp")
+                    tmp_activity.write_text(json.dumps(activity, indent=2) + "\n")
+                    tmp_activity.replace(activity_path)
 
         _check_and_update_status(project_id)
         return cdl
