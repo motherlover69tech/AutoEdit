@@ -111,8 +111,22 @@ def activity_from_turns(
             "source": "whisperx",
             "confidence": None if unresolved else (min(confidences) if confidences else None),
             "mapping_status": "unresolved" if unresolved else ("confirmed" if active else "none"),
+            "authority_status": "unresolved" if unresolved else ("confirmed" if active else "none"),
+            "unresolved": unresolved,
+            "low_confidence": False,
+            "overlap": len(active) > 1,
+            "off_camera": False,
+            "missing_wide": False,
         }
         if unresolved:
+            segment["low_confidence"] = any(
+                turn_start < end and is_low_confidence
+                for turn_start, turn_end, _speaker, _unresolved, is_low_confidence, _confidence, _reason_override in normalized
+            )
+            segment["off_camera"] = any(
+                turn_start < end and reason_override == "off_camera:wide"
+                for turn_start, turn_end, _speaker, _unresolved, _is_low_confidence, _confidence, reason_override in normalized
+            )
             segment["safe_wide"] = True
             if len(active) > 1:
                 segment["reason"] = "overlap:wide"
@@ -170,6 +184,14 @@ def _merge(segments: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             and merged[-1]["mapping_status"] == segment["mapping_status"]
             and merged[-1].get("reason") == segment.get("reason")
             and merged[-1].get("confidence") == segment.get("confidence")
+            and {
+                key: value for key, value in merged[-1].items()
+                if key not in {"start_ms", "end_ms"}
+            }
+            == {
+                key: value for key, value in segment.items()
+                if key not in {"start_ms", "end_ms"}
+            }
         ):
             merged[-1]["end_ms"] = segment["end_ms"]
         else:

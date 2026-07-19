@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -313,3 +314,22 @@ def test_player_state_urls_do_not_expose_data_root(app_context):
     assert "/data" not in serialized
     assert "/source/" not in serialized
     assert f"/projects/{seeded['project_id']}/media/" in serialized
+
+
+def test_player_state_exposes_projected_activity_additively(app_context):
+    client, data_root, engine = app_context
+    seeded = _seed_player_project(client, data_root, engine)
+    activity_path = data_root / seeded["project_id"] / "audio" / "ai" / "v1" / "activity-whisperx.json"
+    activity_path.parent.mkdir(parents=True)
+    activity = {
+        "source": "whisperx",
+        "artifact_version": "run-one",
+        "total_duration_ms": 4000,
+        "timeline": [{"start_ms": 0, "end_ms": 4000, "active": [], "mapping_status": "unresolved", "authority_status": "unresolved", "unresolved": True}],
+    }
+    activity_path.write_text(json.dumps(activity))
+
+    body = client.get(f"/projects/{seeded['project_id']}/player-state").json()
+
+    assert body["projected_activity"] == activity
+    assert body["cut"]["clips"] == seeded["cdl"]["clips"]

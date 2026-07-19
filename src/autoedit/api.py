@@ -1264,8 +1264,23 @@ def create_app(
         analysis_payload = {"source": analysis_source, "mapping_status": mapping_status}
         if analysis_version:
             analysis_payload["artifact_version"] = analysis_version
+        # Projected activity is an additive, read-only view.  It is deliberately
+        # loaded from the versioned AI publication and never from activity.json:
+        # the latter is the immutable VAD baseline.  A malformed publication is
+        # an explicit API error rather than a silent fallback to stale data.
+        projected_activity = None
+        projected_activity_path = project_dir / "audio" / "ai" / "v1" / "activity-whisperx.json"
+        if projected_activity_path.is_file():
+            try:
+                candidate = json.loads(projected_activity_path.read_text())
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise HTTPException(status_code=422, detail=f"invalid projected activity: {exc}") from exc
+            if not isinstance(candidate, dict) or not isinstance(candidate.get("timeline"), list):
+                raise HTTPException(status_code=422, detail="invalid projected activity: timeline is required")
+            projected_activity = candidate
         return {
             "analysis": analysis_payload,
+            "projected_activity": projected_activity,
             "project": {
                 "id": project["id"],
                 "name": project["name"],
@@ -2845,6 +2860,7 @@ def create_app(
                  "speaker_id": None, "confidence": turn.get("confidence")}
                 for turn in ai_artifact.get("diarization_turns", [])
                 if str(turn["turn_id"]) not in resolved_ids
+                and str(turn["diarizer_speaker_id"]) not in confirmations
             )
             try:
                 timeline = activity_from_turns(turns, timeline_end_ms=int(ai_artifact["timeline_end_ms"]), confidence_threshold=0.5)
@@ -2869,6 +2885,25 @@ def create_app(
             if a.role == "wide":
                 wide_angle_id = a.id
                 break
+
+        # Keep safety conditions machine-readable in the API response.  The
+        # player may use the CDL reasons for display, but callers must not
+        # infer safety state by parsing editorial prose.
+        projection_conditions = {
+            "missing_wide": wide_angle_id is None,
+            "unresolved": any(item.get("reason") == "unresolved:wide" for item in timeline),
+            "low_confidence": any(item.get("reason") == "low_confidence:wide" for item in timeline),
+            "overlap": any(item.get("reason") == "overlap:wide" for item in timeline),
+            "off_camera": any(item.get("reason") == "off_camera:wide" for item in timeline),
+        }
+        if projection_conditions["missing_wide"] and ai_artifact is not None:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "AI cut requires a configured wide angle; add a wide source before importing the projection",
+                    "conditions": projection_conditions,
+                },
+            )
 
         # Generate CDL
         cut_params = payload.params if payload else None
@@ -2946,6 +2981,12 @@ def create_app(
                     f"source_unavailable:{original['angle_id']}:{original.get('reason', '')}",
                 )
                 if candidate is not None and _clip_within_source(candidate):
+                    candidate["projection"] = {
+                        **dict(original.get("projection", {})),
+                        "missing_wide": True,
+                        "source_fallback_angle_id": original["angle_id"],
+                    }
+                    candidate.update(candidate["projection"])
                     return candidate
             return None
 
@@ -3054,6 +3095,7 @@ def create_app(
                 detail=f"cut generation failed closed: {cut_validation.get('error', 'invalid CDL')}",
             )
         cdl["analysis_source"] = "whisperx" if ai_artifact is not None else "vad"
+        cdl["conditions"] = projection_conditions
         if ai_artifact is not None:
             cdl["analysis_artifact_version"] = artifact_version(ai_artifact)
 
@@ -3101,13 +3143,15 @@ def create_app(
                 # Write the candidate bytes before touching the DB.  A failed
                 # candidate write therefore cannot create an orphan DB row.
                 tmp_cdl = cdl_path.with_suffix(cdl_path.suffix + ".tmp")
-                tmp_cdl.write_text(json.dumps(cdl, indent=2) + "\n")
                 tmp_paths.append(tmp_cdl)
+                # Track the staging path before writing: a filesystem error
+                # can leave a truncated temporary file behind.
+                tmp_cdl.write_text(json.dumps(cdl, indent=2) + "\n")
                 tmp_activity = None
                 if activity_path is not None:
                     tmp_activity = activity_path.with_suffix(activity_path.suffix + ".tmp")
-                    tmp_activity.write_text(json.dumps(activity, indent=2) + "\n")
                     tmp_paths.append(tmp_activity)
+                    tmp_activity.write_text(json.dumps(activity, indent=2) + "\n")
 
                 session.execute(
                     cuts.insert().values(

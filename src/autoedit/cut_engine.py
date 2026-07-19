@@ -132,6 +132,14 @@ def _resolve_activity_segments(
             "end_ms": seg["end_ms"],
             "kind": kind,
             "speaker": speaker,
+            # Preserve the complete projection metadata through editorial
+            # resolution; persistence must not reduce an AI span to angle/time.
+            "projection": {
+                # Keep the complete source projection, including its source
+                # bounds. The flattened clip fields are editorial helpers;
+                # this nested object is the lossless record.
+                key: value for key, value in seg.items()
+            },
         }
         if kind == "overlap":
             intent["active"] = list(active)
@@ -241,8 +249,18 @@ def _merge_intents(intents: list[dict[str, Any]]) -> list[dict[str, Any]]:
             and merged[-1]["kind"] == it["kind"]
             and merged[-1]["speaker"] == it["speaker"]
             and merged[-1].get("reason") == it.get("reason")
+            and {
+                key: value for key, value in merged[-1].get("projection", {}).items()
+                if key not in {"start_ms", "end_ms"}
+            }
+            == {
+                key: value for key, value in it.get("projection", {}).items()
+                if key not in {"start_ms", "end_ms"}
+            }
         ):
             merged[-1]["end_ms"] = it["end_ms"]
+            if "projection" in merged[-1]:
+                merged[-1]["projection"]["end_ms"] = it["projection"].get("end_ms", it["end_ms"])
             if it.get("reason") and not merged[-1].get("reason"):
                 merged[-1]["reason"] = it["reason"]
         else:
@@ -284,10 +302,20 @@ def _merge_same_angle(clips: list[dict[str, Any]]) -> list[dict[str, Any]]:
             merged
             and merged[-1]["angle_id"] == clip["angle_id"]
             and merged[-1].get("reason") == clip.get("reason")
+            and {
+                key: value for key, value in merged[-1].get("projection", {}).items()
+                if key not in {"start_ms", "end_ms"}
+            }
+            == {
+                key: value for key, value in clip.get("projection", {}).items()
+                if key not in {"start_ms", "end_ms"}
+            }
         ):
             prev = merged[-1]
             clip_end = clip["timeline_in_ms"] + clip["dur_ms"]
             prev["dur_ms"] = clip_end - prev["timeline_in_ms"]
+            if "projection" in prev:
+                prev["projection"]["end_ms"] = clip.get("projection", {}).get("end_ms", clip_end)
         else:
             merged.append(dict(clip))
     return merged
@@ -320,6 +348,8 @@ def _enforce_min_shot_ms(clips: list[dict[str, Any]], min_shot_ms: int) -> list[
         orig_end = orig_following["timeline_in_ms"] + orig_following["dur_ms"]
         new_start = clips_list[idx]["timeline_in_ms"]
         clips_list[idx + 1] = {
+            **{key: value for key, value in orig_following.items()
+               if key not in {"timeline_in_ms", "dur_ms"}},
             "angle_id": orig_following["angle_id"],
             "timeline_in_ms": new_start,
             "dur_ms": orig_end - new_start,
@@ -567,6 +597,7 @@ def generate_cdl(
             "timeline_in_ms": t_start,
             "dur_ms": t_end - t_start,
             "reason": reason,
+            "projection": dict(it.get("projection", {})),
         })
         last_angle_id = angle_id
 
@@ -583,8 +614,18 @@ def generate_cdl(
                 adjusted
                 and adjusted[-1]["angle_id"] == clip["angle_id"]
                 and adjusted[-1].get("reason") == clip.get("reason")
+                and {
+                    key: value for key, value in adjusted[-1].get("projection", {}).items()
+                    if key not in {"start_ms", "end_ms"}
+                }
+                == {
+                    key: value for key, value in clip.get("projection", {}).items()
+                    if key not in {"start_ms", "end_ms"}
+                }
             ):
                 adjusted[-1]["dur_ms"] = new_out - adjusted[-1]["timeline_in_ms"]
+                if "projection" in adjusted[-1]:
+                    adjusted[-1]["projection"]["end_ms"] = clip.get("projection", {}).get("end_ms", new_out)
             else:
                 if adjusted and new_in < adjusted[-1]["timeline_in_ms"] + adjusted[-1]["dur_ms"]:
                     prev = adjusted[-1]
@@ -597,6 +638,8 @@ def generate_cdl(
                 dur_ms = new_out - new_in
                 if dur_ms > 0:
                     adjusted.append({
+                        **{key: value for key, value in clip.items()
+                           if key not in {"timeline_in_ms", "dur_ms"}},
                         "angle_id": clip["angle_id"],
                         "timeline_in_ms": new_in,
                         "dur_ms": dur_ms,
@@ -657,7 +700,10 @@ def generate_cdl(
             offset = sync_offsets.get(clip["angle_id"], 0)
             src_in = _frame_round(t_in - offset, fps_num, fps_den)
 
+            projection = dict(clip.get("projection", {}))
             snapped.append(_with_shot_reason({
+                **projection,
+                "projection": projection,
                 "angle_id": clip["angle_id"],
                 "src_in_ms": src_in,
                 "timeline_in_ms": t_in,

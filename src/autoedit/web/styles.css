@@ -188,6 +188,12 @@ textarea:focus { outline: none; border-color: var(--red); }
 .shot-reason[data-tone="uncertain"] { border-left-color: #f0d34f; }
 .shot-reason[data-tone="manual"] { border-left-color: #fff; }
 @media (max-width: 640px) { .shot-reason { top: 8px; left: 8px; max-width: calc(100% - 16px); padding: 7px 9px; } .shot-reason > span:last-child { display: none; } }
+.analysis-status { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 14px var(--pad, 20px) 0; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; }
+.analysis-status > div { display: grid; gap: 4px; padding: 10px 12px; background: var(--surface-1); }
+.analysis-label { font-family: var(--mono); font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--t-low); }
+.analysis-status strong { font-family: var(--mono); font-size: 11px; color: var(--t-hi); }
+.analysis-status strong[data-tone="uncertain"] { color: var(--warn); }
+@media (max-width: 640px) { .analysis-status { grid-template-columns: 1fr; } }
 
 /* ── Audio transport ───────────────────────────────────── */
 .program-audio { width: 100%; margin: 14px 0; }
@@ -201,6 +207,20 @@ textarea:focus { outline: none; border-color: var(--red); }
 .timeline-lane .lane-label { width: 72px; flex-shrink: 0; font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--t-low); text-align: right; }
 .timeline-lane .lane-track { flex: 1; height: 22px; background: var(--surface-2); border-radius: var(--r-sm); position: relative; overflow: hidden; }
 .lane-block { position: absolute; top: 0; bottom: 0; border-radius: 2px; }
+.lane-block[data-status="confirmed"] { background: var(--activity-confirmed); }
+.lane-block[data-status="unresolved"] { background: var(--activity-unresolved); }
+.lane-block[data-status="low_confidence"] { background: var(--activity-low-confidence); }
+.lane-block[data-status="overlap"] { background: var(--activity-overlap); }
+.lane-block[data-status="off_camera"] { background: var(--activity-off-camera); }
+.lane-block[data-status="missing_wide"] { background: var(--activity-missing-wide); }
+:root {
+  --activity-confirmed: #4f8f72;
+  --activity-unresolved: #d18b35;
+  --activity-low-confidence: #d4b83f;
+  --activity-overlap: #b45f8c;
+  --activity-off-camera: #8870b8;
+  --activity-missing-wide: #d9534f;
+}
 .timeline-scrubber { position: relative; height: 24px; background: var(--surface-2); border-radius: var(--r-sm); cursor: pointer; margin-top: 4px; }
 .scrubber-playhead { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--t-hi); box-shadow: 0 0 8px rgba(247,244,239,.5); pointer-events: none; }
 

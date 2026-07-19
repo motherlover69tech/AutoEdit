@@ -3,7 +3,124 @@ export function findClipAtTime(clips, tMs) {
     const start = clip.timeline_in_ms;
     const end = clip.timeline_in_ms + clip.dur_ms;
     return tMs >= start && tMs < end;
-  }) || clips.at(-1) || null;
+  }) || null;
+}
+
+export function validateContiguousClips(clips) {
+  if (!Array.isArray(clips) || clips.length === 0) {
+    throw new Error("Player cut is empty; no authoritative timeline is available");
+  }
+  let expectedStart = 0;
+  for (const [index, clip] of clips.entries()) {
+    if (!clip || !Number.isInteger(clip.timeline_in_ms) || !Number.isInteger(clip.dur_ms)
+      || !Number.isInteger(clip.src_in_ms) || clip.timeline_in_ms !== expectedStart
+      || clip.dur_ms <= 0 || clip.src_in_ms < 0 || !clip.angle_id) {
+      throw new Error(`Player cut contains malformed or non-contiguous clip ${index + 1}`);
+    }
+    expectedStart += clip.dur_ms;
+  }
+  return { totalDurationMs: expectedStart };
+}
+
+/** Validate the additive AI projection without repairing or clipping it. */
+export function normalizeProjectedActivity(payload) {
+  if (payload == null) return null;
+  if (!payload || typeof payload !== "object" || !Array.isArray(payload.timeline)) {
+    throw new Error("Projected activity is malformed; timeline is required");
+  }
+  if (!Number.isInteger(payload.total_duration_ms) || payload.total_duration_ms <= 0) {
+    throw new Error("Projected activity has an invalid total duration");
+  }
+  let expectedStart = 0;
+  const timeline = payload.timeline.map((segment, index) => {
+    if (!segment || !Number.isInteger(segment.start_ms) || !Number.isInteger(segment.end_ms)
+      || segment.start_ms !== expectedStart || segment.end_ms <= segment.start_ms
+      || segment.end_ms > payload.total_duration_ms || !Array.isArray(segment.active)
+      || typeof segment.mapping_status !== "string" || typeof segment.authority_status !== "string") {
+      throw new Error(`Projected activity contains malformed segment ${index + 1}`);
+    }
+    expectedStart = segment.end_ms;
+    return Object.freeze({ ...segment, active: Object.freeze([...segment.active]) });
+  });
+  if (expectedStart !== payload.total_duration_ms) {
+    throw new Error("Projected activity does not cover the accepted timeline");
+  }
+  return Object.freeze({ ...payload, timeline: Object.freeze(timeline) });
+}
+
+/** Small state seam: refresh may replace only the projected read model. */
+export function createPlayerStateStore(initialState) {
+  let state = initialState;
+  let projectedError = null;
+  return {
+    get state() { return state; },
+    get projectedError() { return projectedError; },
+    replaceProjected(payload) {
+      const projected = normalizeProjectedActivity(payload);
+      state = { ...state, projected_activity: projected };
+      projectedError = null;
+      return state;
+    },
+    failProjected(error) {
+      projectedError = error instanceof Error ? error.message : String(error);
+      state = { ...state, projected_activity: null };
+      return state;
+    },
+  };
+}
+
+export function analysisStatusDisplay(analysis = {}, clip = null) {
+  const conditions = { ...(analysis.conditions || {}), ...(clip?.projection || {}) };
+  const safety = conditions.missing_wide ? "Missing wide — playback blocked safely"
+    : conditions.unresolved ? "Unresolved speaker — wide chosen to avoid a wrong close-up"
+    : conditions.low_confidence ? "Low confidence — wide chosen until identity is confirmed"
+    : conditions.off_camera ? "Off-camera or uncertain — wide chosen safely"
+    : conditions.overlap ? "Overlap — wide chosen for simultaneous speech"
+    : "Confirmed authority";
+  const source = analysis.source === "whisperx" ? "WhisperX projected activity" : "VAD baseline activity";
+  const mapping = {
+    confirmed: "Mapping confirmed",
+    needs_confirmation: "Mapping needs confirmation",
+    unresolved: "Mapping unresolved",
+    baseline: "Baseline mapping",
+  }[analysis.mapping_status] || "Mapping status unavailable";
+  return { source, mapping, safety, tone: conditions.unresolved || conditions.low_confidence || conditions.missing_wide || conditions.overlap || conditions.off_camera ? "uncertain" : "confirmed" };
+}
+
+const ACTIVITY_STATUS_LABELS = {
+  confirmed: ["Confirmed authority", "confirmed"],
+  unresolved: ["Unresolved", "unresolved"],
+  low_confidence: ["Low confidence", "low-confidence"],
+  overlap: ["Overlap", "overlap"],
+  off_camera: ["Off-camera", "off-camera"],
+  missing_wide: ["Missing wide", "missing-wide"],
+};
+
+export function activityStatusDisplay(segment = {}) {
+  const status = segment.missing_wide ? "missing_wide"
+    : segment.off_camera ? "off_camera"
+    : segment.overlap ? "overlap"
+    : segment.low_confidence ? "low_confidence"
+    : segment.unresolved || segment.authority_status === "unresolved" ? "unresolved"
+    : "confirmed";
+  const [label, tone] = ACTIVITY_STATUS_LABELS[status];
+  return { status, label, tone };
+}
+
+export function validateMasterTimeSpans(spans, totalMs) {
+  if (!Array.isArray(spans) || !Number.isInteger(totalMs) || totalMs <= 0) {
+    throw new Error("Timeline markers have an invalid master duration");
+  }
+  let expected = 0;
+  for (const [index, span] of spans.entries()) {
+    if (!span || !Number.isInteger(span.start_ms) || !Number.isInteger(span.end_ms)
+      || span.start_ms !== expected || span.end_ms <= span.start_ms || span.end_ms > totalMs) {
+      throw new Error(`Timeline markers contain an invalid master range ${index + 1}`);
+    }
+    expected = span.end_ms;
+  }
+  if (expected !== totalMs) throw new Error("Timeline markers do not cover the master timeline");
+  return true;
 }
 
 export function findNextClip(clips, tMs) {
@@ -611,8 +728,12 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
     shotReason: doc.getElementById("shotReason"),
     shotReasonLabel: doc.getElementById("shotReasonLabel"),
     shotReasonDetail: doc.getElementById("shotReasonDetail"),
+    analysisSource: doc.getElementById("analysisSource"),
+    analysisMapping: doc.getElementById("analysisMapping"),
+    analysisSafety: doc.getElementById("analysisSafety"),
     // Timeline
     cdlLane: doc.getElementById("cdlLane"),
+    projectedLane: doc.getElementById("projectedLane"),
     topicLane: doc.getElementById("topicLane"),
     waveformTrack: doc.getElementById("waveformTrack"),
     loudnessLane: doc.getElementById("loudnessLane"),
@@ -642,6 +763,19 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
   }
 
   const statePayload = await response.json();
+  try {
+    validateContiguousClips(statePayload.cut?.clips || []);
+  } catch (error) {
+    setStatus(elements, `Timeline error: ${error.message}`);
+    return;
+  }
+  try {
+    statePayload.projected_activity = normalizeProjectedActivity(statePayload.projected_activity);
+  } catch (error) {
+    setStatus(elements, `Timeline error: ${error.message}`);
+    if (elements.projectedLane) elements.projectedLane.replaceChildren();
+    return;
+  }
   const angleById = new Map(statePayload.angles.map((angle) => [angle.id, angle]));
   const clips = statePayload.cut.clips || [];
   const override = createManualOverrideState();
@@ -652,6 +786,14 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
   let visible = elements.videoA;
   let hidden = elements.videoB;
   let currentAngleId = null;
+
+  const initialAnalysis = analysisStatusDisplay(statePayload.analysis);
+  if (elements.analysisSource) elements.analysisSource.textContent = initialAnalysis.source;
+  if (elements.analysisMapping) elements.analysisMapping.textContent = initialAnalysis.mapping;
+  if (elements.analysisSafety) {
+    elements.analysisSafety.textContent = initialAnalysis.safety;
+    elements.analysisSafety.dataset.tone = initialAnalysis.tone;
+  }
 
   elements.audio.src = statePayload.audio.program_url;
   elements.audio.dataset.projectId = projectId;
@@ -742,6 +884,7 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
 
   // ── Load timeline-state ──────────────────────────────────
   let timelineState = null;
+  renderProjectedActivity(elements, statePayload.projected_activity);
   try {
     const tlRes = await fetch(`/projects/${projectId}/timeline-state`, { credentials: "same-origin" });
     if (tlRes.ok) {
@@ -796,7 +939,9 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
   }
 
   // Load cut parameters
-  loadCutParams(projectId, elements, statePayload, clips, angleById, override, render, frameSeconds);
+  loadCutParams(projectId, elements, statePayload, clips, angleById, override, render, frameSeconds, () => {
+    if (timelineState) renderTimeline(elements, timelineState, clips, angleById);
+  });
 
   // ── Note form submission ─────────────────────────────────
   if (elements.noteForm) {
@@ -943,6 +1088,11 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
     const angleId = override.resolve(autoClip?.angle_id);
     const angle = angleById.get(angleId);
     const reasonDisplay = shotReasonDisplay(autoClip, Boolean(manualAngleId));
+    const analysisDisplay = analysisStatusDisplay(statePayload.analysis, autoClip);
+    if (elements.analysisSafety) {
+      elements.analysisSafety.textContent = analysisDisplay.safety;
+      elements.analysisSafety.dataset.tone = analysisDisplay.tone;
+    }
     if (elements.shotReason) elements.shotReason.dataset.tone = reasonDisplay.tone;
     if (elements.shotReasonLabel) elements.shotReasonLabel.textContent = reasonDisplay.label;
     if (elements.shotReasonDetail) elements.shotReasonDetail.textContent = reasonDisplay.detail;
@@ -1056,7 +1206,7 @@ function renderTimeline(elements, timelineState, clips, angleById) {
         });
       }
     }
-    topicSpans.sort((a, b) => a.start_ms - b.start_ms);
+    topicSpans.sort((a, b) => a.start_ms - b.start_ms || a.end_ms - b.end_ms || String(a.label).localeCompare(String(b.label)));
     renderLaneBlocks(elements.topicLane, topicSpans, totalMs);
   }
 
@@ -1069,6 +1219,35 @@ function renderTimeline(elements, timelineState, clips, angleById) {
   // Time display
   if (elements.timelineTime) {
     elements.timelineTime.textContent = `0:00 / ${formatTimelineMs(totalMs)}`;
+  }
+}
+
+function renderProjectedActivity(elements, projected) {
+  if (!elements.projectedLane) return;
+  elements.projectedLane.replaceChildren();
+  if (!projected) return;
+  try {
+    validateMasterTimeSpans(projected.timeline, projected.total_duration_ms);
+  } catch (error) {
+    setStatus(elements, `Timeline error: ${error.message}`);
+    return;
+  }
+  const spans = projected.timeline.map((segment) => {
+    const display = activityStatusDisplay(segment);
+    return {
+      start_ms: segment.start_ms,
+      end_ms: segment.end_ms,
+      colour: `var(--activity-${display.tone})`,
+      label: `${display.label} · ${segment.start_ms}–${segment.end_ms} ms master time`,
+      status: display.status,
+    };
+  });
+  renderLaneBlocks(elements.projectedLane, spans, projected.total_duration_ms);
+  for (const [index, block] of [...elements.projectedLane.children].entries()) {
+    const span = spans[index];
+    block.dataset.status = span.status;
+    block.setAttribute("aria-label", span.label);
+    block.setAttribute("role", "img");
   }
 }
 
@@ -1434,7 +1613,7 @@ function renderAngleLutAssignments(elements, data, projectId, statePayload, angl
 
 // ── Cut Parameters ────────────────────────────────────────
 
-function loadCutParams(projectId, elements, statePayload, clips, angleById, override, render, frameSeconds) {
+function loadCutParams(projectId, elements, statePayload, clips, angleById, override, render, frameSeconds, refreshTimeline = null) {
   const overlapSelect = document.getElementById("cutOverlapToWide");
   const minShotInput = document.getElementById("cutMinShotMs");
   const leadInInput = document.getElementById("cutLeadInMs");
@@ -1528,10 +1707,15 @@ function loadCutParams(projectId, elements, statePayload, clips, angleById, over
         });
         if (res.ok) {
           const newCut = await res.json();
+          // Do not replace the displayed/persisted selection with a malformed
+          // or gapped candidate. The authoritative current cut remains visible
+          // and the failure is explicit in the controls below.
+          validateContiguousClips(newCut.clips);
           // Replace clips with new ones
           clips.length = 0;
           clips.push(...newCut.clips);
           if (statePayload.cut) statePayload.cut.params = params;
+          if (refreshTimeline) refreshTimeline();
           render(true);
           statusEl.textContent = "Cut regenerated";
           statusEl.style.color = "var(--ok)";
@@ -1614,6 +1798,10 @@ if (typeof window !== "undefined") {
     needsDriftCorrection,
     chooseMediaUrl,
     createManualOverrideState,
+    validateContiguousClips,
+    normalizeProjectedActivity,
+    createPlayerStateStore,
+    analysisStatusDisplay,
     // Timeline helpers
     formatTimelineMs,
     msToPercent,

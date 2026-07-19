@@ -62,6 +62,8 @@ def _build_confirmed_ai_project(tmp_path: Path):
     project_dir = tmp_path / pid
     audio_dir = project_dir / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
+    # Required by the public player-state endpoint used to verify selection.
+    (audio_dir / "program.m4a").write_bytes(b"program-audio")
     # Source + analysis WAVs must exist so the store's input-hash verification passes.
     (audio_dir / "source-a.wav").write_bytes(b"source-audio-a")
     (audio_dir / "source-b.wav").write_bytes(b"source-audio-b")
@@ -135,11 +137,10 @@ def _build_confirmed_ai_project(tmp_path: Path):
 def test_ai_cut_is_atomic_on_db_failure(tmp_path: Path):
     engine, client, pid = _build_confirmed_ai_project(tmp_path)
     _seed_prior_vad_cut(engine, tmp_path, pid)
-    # In production the DB error becomes a 500 via FastAPI's handler; mirror
-    # that here so we can assert on the response and the rolled-back files.
-    fail_client = TestClient(
-        client.app, raise_server_exceptions=False
-    )
+    prior_bytes = (tmp_path / pid / "edit" / "cdl.json").read_bytes()
+    prior_player_cut = _selected_player_cut(client, pid)
+    # In production the DB error becomes a 500 via FastAPI's handler; the
+    # helper below uses that same non-raising TestClient behavior.
     activity_path = tmp_path / pid / "audio" / "ai" / "v1" / "activity-whisperx.json"
     cdl_path = tmp_path / pid / "edit" / "cdl_whisperx_run-one.json"
 
@@ -151,8 +152,7 @@ def test_ai_cut_is_atomic_on_db_failure(tmp_path: Path):
 
     cuts.insert = staticmethod(_failing_insert)
     try:
-        response = fail_client.post(f"/projects/{pid}/cut", json={})
-        assert response.status_code >= 500, response.text
+        _assert_failed_publication(engine, client, tmp_path, pid, prior_bytes, prior_player_cut)
     finally:
         cuts.insert = real_insert
 
@@ -182,9 +182,34 @@ def _assert_prior_vad_preserved(engine, client, tmp_path: Path, pid: str) -> Non
     assert [(row._mapping["kind"], row._mapping["name"]) for row in rows] == [("rough", "Prior VAD")]
 
 
+def _selected_player_cut(client, pid: str) -> dict:
+    response = client.get(f"/projects/{pid}/player-state")
+    assert response.status_code == 200, response.text
+    return response.json()["cut"]
+
+
+def _assert_failed_publication(
+    engine, client, tmp_path: Path, pid: str, prior_bytes: bytes, prior_player_cut: dict
+) -> None:
+    response = TestClient(client.app, raise_server_exceptions=False).post(
+        f"/projects/{pid}/cut", json={}
+    )
+    assert response.status_code == 500, response.text
+    assert (tmp_path / pid / "edit" / "cdl.json").read_bytes() == prior_bytes
+    assert _selected_player_cut(client, pid) == prior_player_cut
+    with Session(engine) as session:
+        rows = session.execute(cuts.select().where(cuts.c.project_id == pid)).all()
+    assert not any(row._mapping["kind"] == "ai" for row in rows)
+    rough = next(row._mapping for row in rows if row._mapping["kind"] == "rough")
+    assert rough["name"] == "Prior VAD"
+    assert rough["cdl_json"]["analysis_source"] == "vad"
+
+
 def test_ai_cut_candidate_cdl_write_failure_preserves_prior_vad(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     engine, client, pid = _build_confirmed_ai_project(tmp_path)
     _seed_prior_vad_cut(engine, tmp_path, pid)
+    prior_bytes = (tmp_path / pid / "edit" / "cdl.json").read_bytes()
+    prior_player_cut = _selected_player_cut(client, pid)
     original = Path.write_text
 
     def fail_candidate(path: Path, data: str, *args, **kwargs):
@@ -193,14 +218,32 @@ def test_ai_cut_candidate_cdl_write_failure_preserves_prior_vad(tmp_path: Path, 
         return original(path, data, *args, **kwargs)
 
     monkeypatch.setattr(Path, "write_text", fail_candidate)
+    _assert_failed_publication(engine, client, tmp_path, pid, prior_bytes, prior_player_cut)
+
+
+def test_ai_cut_partial_staging_write_leaves_no_temp_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    _seed_prior_vad_cut(engine, tmp_path, pid)
+    original = Path.write_text
+
+    def fail_after_partial_write(path: Path, data: str, *args, **kwargs):
+        if "cdl_whisperx" in path.name:
+            original(path, data[:8], *args, **kwargs)
+            raise OSError("simulated partial candidate CDL write failure")
+        return original(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_after_partial_write)
     response = TestClient(client.app, raise_server_exceptions=False).post(f"/projects/{pid}/cut", json={})
     assert response.status_code >= 500
+    assert not list((tmp_path / pid / "edit").glob("cdl_whisperx_*.tmp"))
     _assert_prior_vad_preserved(engine, client, tmp_path, pid)
 
 
 def test_ai_cut_activity_write_failure_preserves_prior_vad(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     engine, client, pid = _build_confirmed_ai_project(tmp_path)
     _seed_prior_vad_cut(engine, tmp_path, pid)
+    prior_bytes = (tmp_path / pid / "edit" / "cdl.json").read_bytes()
+    prior_player_cut = _selected_player_cut(client, pid)
     original = Path.write_text
 
     def fail_activity(path: Path, data: str, *args, **kwargs):
@@ -209,9 +252,7 @@ def test_ai_cut_activity_write_failure_preserves_prior_vad(tmp_path: Path, monke
         return original(path, data, *args, **kwargs)
 
     monkeypatch.setattr(Path, "write_text", fail_activity)
-    response = TestClient(client.app, raise_server_exceptions=False).post(f"/projects/{pid}/cut", json={})
-    assert response.status_code >= 500
-    _assert_prior_vad_preserved(engine, client, tmp_path, pid)
+    _assert_failed_publication(engine, client, tmp_path, pid, prior_bytes, prior_player_cut)
 
 
 def test_ai_cut_replace_failure_preserves_prior_vad(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -234,19 +275,46 @@ def test_ai_cut_persists_all_sides_on_success(tmp_path: Path):
     engine, client, pid = _build_confirmed_ai_project(tmp_path)
     _seed_prior_vad_cut(engine, tmp_path, pid)
     prior_bytes = (tmp_path / pid / "edit" / "cdl.json").read_bytes()
+    prior_player_cut = _selected_player_cut(client, pid)
     response = client.post(f"/projects/{pid}/cut", json={})
     assert response.status_code == 200, response.text
     cdl = response.json()
     assert cdl["analysis_source"] == "whisperx"
+    assert cdl["conditions"] == {
+        "missing_wide": False,
+        "unresolved": False,
+        "low_confidence": False,
+        "overlap": False,
+        "off_camera": False,
+    }
 
     activity_path = tmp_path / pid / "audio" / "ai" / "v1" / "activity-whisperx.json"
     cdl_path = tmp_path / pid / "edit" / "cdl_whisperx_run-one.json"
     assert activity_path.is_file(), "activity artifact must be published on success"
     assert cdl_path.is_file(), "CDL file must be published on success"
     assert (tmp_path / pid / "edit" / "cdl.json").read_bytes() == prior_bytes
+    assert _selected_player_cut(client, pid) == prior_player_cut
     with Session(engine) as session:
-        rows = session.execute(cuts.select().where(cuts.c.project_id == pid)).all()
-    assert {row._mapping["kind"] for row in rows} == {"rough", "ai"}
+        rows = session.execute(
+            cuts.select().where(cuts.c.project_id == pid).order_by(cuts.c.kind.desc())
+        ).all()
+    assert [row._mapping["kind"] for row in rows] == ["rough", "ai"]
+    ai_row = next(row._mapping for row in rows if row._mapping["kind"] == "ai")
+    # Persistence must retain the complete candidate, not only fields needed
+    # for angle selection. Compare every clip with the API response.
+    assert ai_row["cdl_json"]["clips"] == cdl["clips"]
+    persisted_clip = ai_row["cdl_json"]["clips"][0]
+    # The DB JSON must be a lossless copy of the API clip object, including
+    # projection authority/status and all explicit safety-condition flags.
+    assert persisted_clip == cdl["clips"][0]
+    assert {
+        "src_in_ms", "timeline_in_ms", "dur_ms", "reason", "reason_code",
+        "source", "mapping_status", "authority_status", "confidence",
+        "unresolved", "low_confidence", "overlap", "off_camera", "missing_wide",
+        "projection",
+    } <= persisted_clip.keys()
+    assert persisted_clip["projection"]["start_ms"] == 0
+    assert persisted_clip["projection"]["end_ms"] == 500
 
 
 def test_confirmed_solo_projection_selects_mapped_close_camera(tmp_path: Path):
@@ -255,7 +323,66 @@ def test_confirmed_solo_projection_selects_mapped_close_camera(tmp_path: Path):
     assert response.status_code == 200, response.text
     clips = response.json()["clips"]
     assert clips[0]["angle_id"] != "wide"
+    assert clips[0]["timeline_in_ms"] == 0
+    # 500 ms is represented on the canonical frame grid (12 frames at 25 fps).
+    assert clips[0]["dur_ms"] == 480
     assert clips[0]["reason_code"] == "speaking"
+
+
+def test_ai_cut_reports_missing_wide_condition(tmp_path: Path):
+    engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    with Session(engine) as session:
+        session.execute(angles.delete().where(angles.c.project_id == pid, angles.c.role == "wide"))
+        session.commit()
+
+    response = client.post(f"/projects/{pid}/cut", json={})
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert "wide angle" in detail["message"]
+    assert detail["conditions"]["missing_wide"] is True
+
+
+def test_ai_cut_reports_low_confidence_condition_in_api_and_persistence(tmp_path: Path):
+    engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    result_path = tmp_path / pid / "audio" / "ai" / "v1" / "result.json"
+    artifact = json.loads(result_path.read_text())
+    artifact["speaker_turns"][0]["confidence"] = 0.1
+    result_path.write_text(json.dumps(artifact))
+
+    response = client.post(f"/projects/{pid}/cut", json={})
+    assert response.status_code == 200, response.text
+    cdl = response.json()
+    assert cdl["conditions"]["low_confidence"] is True
+    low_confidence = next(clip for clip in cdl["clips"] if clip["timeline_in_ms"] == 0)
+    assert low_confidence["low_confidence"] is True
+    with Session(engine) as session:
+        row = session.execute(
+            cuts.select().where(cuts.c.project_id == pid, cuts.c.kind == "ai")
+        ).one()
+    assert row._mapping["cdl_json"]["conditions"]["low_confidence"] is True
+    assert row._mapping["cdl_json"]["clips"] == cdl["clips"]
+
+
+def test_ai_cut_rejects_malformed_artifact_through_api(tmp_path: Path):
+    _engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    result_path = tmp_path / pid / "audio" / "ai" / "v1" / "result.json"
+    result_path.write_text(json.dumps({"schema_version": "1.0", "run_id": "run-one"}))
+
+    response = client.post(f"/projects/{pid}/cut", json={})
+    assert response.status_code == 422, response.text
+    assert "invalid AI result artifact" in str(response.json()["detail"])
+
+
+def test_ai_cut_rejects_out_of_range_artifact_through_api(tmp_path: Path):
+    _engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    result_path = tmp_path / pid / "audio" / "ai" / "v1" / "result.json"
+    artifact = json.loads(result_path.read_text())
+    artifact["speaker_turns"][0]["start_ms"] = -1
+    result_path.write_text(json.dumps(artifact))
+
+    response = client.post(f"/projects/{pid}/cut", json={})
+    assert response.status_code == 422, response.text
+    assert "invalid AI result artifact" in str(response.json()["detail"])
 
 
 def test_gate_one_two_field_flag_cannot_authorize_ai_cut(tmp_path: Path):

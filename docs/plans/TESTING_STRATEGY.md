@@ -75,6 +75,26 @@ Acceptance checks required before Stage 7.4 can be marked `done`:
 
 Post-deploy audit note: local Tester artifact `tests/browser/stage_7_4_notes.spec.cjs` exercises these four behaviors in Chromium. Unmodified, it serves local `master` and reproduces a stale delete-marker defect. A strict Designer audit pointed it at exact deployed `c096e4e`, served candidate CSS and audio/LUT fixtures, and returned `STAGE_7_4_XSS_GATE_PASS` with zero console/page errors; the post-delete screenshot shows one remaining note and one Notes-lane marker. Stage 7.4 remains `in_progress` until an independent Tester repeats that exact-candidate run.
 
+## UI-AIGPU1-007 player-state acceptance coverage
+
+Focused player contract coverage in `tests/player_logic.test.mjs` and
+`tests/test_player_state.py` exercises immutable VAD/current-cut handling,
+master-time contiguity, out-of-range lookup, malformed and out-of-range
+projection payloads, confirmed/unresolved/low-confidence/overlap/off-camera/
+missing-wide status tones, refresh failure recovery, and the rule that
+suggested mappings or arbitrary close-ups never become authoritative selection.
+The contract-faithful API fixture verifies projected activity is additive and
+does not replace persisted cut clips.
+
+Independent Tester run (2026-07-19, local dirty candidate):
+
+- `node tests/player_logic.test.mjs` — passed.
+- `OLLAMA_BASE_URL='' LLM_MODEL='' env -u VIRTUAL_ENV uv run pytest tests/test_player_state.py tests/test_player_static.py tests/test_ai_cut_atomicity.py -q -rs` — 24 passed.
+- `python3 -m compileall -q src tests` and `git diff --check` — passed.
+- Live browser reached `https://ingest.peteflix.uk` sign-in. Authenticated player traversal was not performed because no test credential was available; no pass is claimed for authenticated visual rendering, refresh, network-failure recovery, or responsive layout.
+- Full deterministic suite `OLLAMA_BASE_URL='' LLM_MODEL='' env -u VIRTUAL_ENV uv run pytest -q -rs` — 823 passed, 3 skipped (two golden-media fixtures require `AUTOEDIT_GOLDEN_MEDIA_ROOT`; central-MySQL credentials absent).
+- `docker compose config` was unavailable because the installed Docker CLI has no Compose subcommand/plugin (`docker: 'compose' is not a docker command`); no Compose acceptance claim is made.
+
 ## Current test organization
 
 - Pytest discovers 50 `tests/test_*.py` modules under the configured `testpaths = ["tests"]`.

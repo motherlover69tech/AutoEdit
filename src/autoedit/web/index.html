@@ -66,6 +66,12 @@
         <div id="statusText" class="status-text" role="status">Loading player…</div>
       </section>
 
+      <section class="analysis-status" aria-label="Analysis authority and safety status" aria-live="polite">
+        <div><span class="analysis-label">Analysis</span><strong id="analysisSource">Loading…</strong></div>
+        <div><span class="analysis-label">Mapping</span><strong id="analysisMapping">Loading…</strong></div>
+        <div><span class="analysis-label">Safety</span><strong id="analysisSafety" data-tone="confirmed">Loading…</strong></div>
+      </section>
+
       <audio id="programAudio" class="program-audio" controls preload="auto"></audio>
 
       <section class="timeline-section" aria-label="Metadata timeline">
@@ -77,6 +83,10 @@
           <div class="timeline-lane" data-lane="cdl">
             <div class="lane-label">Angle</div>
             <div class="lane-track" id="cdlLane"></div>
+          </div>
+          <div class="timeline-lane" data-lane="authority">
+            <div class="lane-label">Authority</div>
+            <div class="lane-track" id="projectedLane" aria-label="Authoritative activity status markers"></div>
           </div>
           <div class="timeline-lane" data-lane="topics">
             <div class="lane-label">Topics</div>

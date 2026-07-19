@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import {
   chooseMediaUrl,
   createManualOverrideState,
+  createPlayerStateStore,
+  analysisStatusDisplay,
   findClipAtTime,
   findNextClip,
   formatTimelineMs,
@@ -16,6 +18,10 @@ import {
   timelineMsFromAudio,
   videoTimeForAngle,
   videoTimeForClip,
+  validateContiguousClips,
+  normalizeProjectedActivity,
+  activityStatusDisplay,
+  validateMasterTimeSpans,
 } from '../src/autoedit/web/player.js';
 
 const clips = [
@@ -28,6 +34,61 @@ assert.equal(findClipAtTime(clips, 999).angle_id, 'a');
 assert.equal(findClipAtTime(clips, 1000).angle_id, 'b');
 assert.equal(findNextClip(clips, 500).angle_id, 'b');
 assert.equal(findNextClip(clips, 1500), null);
+assert.equal(findClipAtTime(clips, 2500), null);
+assert.deepEqual(validateContiguousClips(clips), { totalDurationMs: 2000 });
+assert.throws(() => validateContiguousClips([{ ...clips[1], timeline_in_ms: 10 }]), /non-contiguous/);
+assert.throws(() => validateContiguousClips([]), /empty/);
+assert.throws(() => validateContiguousClips([{ ...clips[0], src_in_ms: -1 }]), /malformed/);
+assert.throws(() => validateContiguousClips([{ ...clips[0], dur_ms: 0 }]), /malformed/);
+assert.throws(() => validateContiguousClips([{ ...clips[0], timeline_in_ms: 0.5 }]), /malformed/);
+const projected = normalizeProjectedActivity({
+  total_duration_ms: 2000,
+  timeline: [
+    { start_ms: 0, end_ms: 1000, active: ['speaker-a'], mapping_status: 'confirmed', authority_status: 'confirmed' },
+    { start_ms: 1000, end_ms: 2000, active: [], mapping_status: 'unresolved', authority_status: 'unresolved', unresolved: true },
+  ],
+});
+assert.equal(projected.timeline[1].unresolved, true);
+assert.equal(activityStatusDisplay({ authority_status: 'confirmed' }).label, 'Confirmed authority');
+assert.equal(activityStatusDisplay({ unresolved: true }).tone, 'unresolved');
+assert.equal(activityStatusDisplay({ low_confidence: true }).tone, 'low-confidence');
+assert.equal(activityStatusDisplay({ overlap: true }).tone, 'overlap');
+assert.equal(activityStatusDisplay({ off_camera: true }).tone, 'off-camera');
+assert.equal(activityStatusDisplay({ missing_wide: true }).tone, 'missing-wide');
+// Suggested mappings are audit-only: they cannot become authority or select
+// an arbitrary close-up.
+assert.equal(
+  activityStatusDisplay({
+    authority_status: 'unresolved',
+    unresolved: true,
+    suggested_mapping: { speaker_id: 'speaker-a', angle_id: 'closeup-a' },
+  }).status,
+  'unresolved',
+);
+assert.equal(findClipAtTime([{ ...clips[0], suggested_angle_id: 'arbitrary-closeup' }], 500).angle_id, 'a');
+assert.equal(validateMasterTimeSpans(projected.timeline, 2000), true);
+assert.throws(() => validateMasterTimeSpans([{ start_ms: 0, end_ms: 900 }], 2000), /cover/);
+assert.throws(() => normalizeProjectedActivity({ total_duration_ms: 2000, timeline: [{ ...projected.timeline[1], start_ms: 500 }] }), /malformed/);
+assert.throws(() => normalizeProjectedActivity({ total_duration_ms: 2000, timeline: [{ ...projected.timeline[1], end_ms: 2500 }] }), /malformed/);
+assert.throws(() => normalizeProjectedActivity({ total_duration_ms: 2000, timeline: [] }), /cover/);
+const stateStore = createPlayerStateStore({ cut: { clips }, projected_activity: null });
+const priorCut = stateStore.state.cut;
+stateStore.replaceProjected(projected);
+assert.equal(stateStore.state.cut, priorCut);
+assert.deepEqual(stateStore.state.projected_activity, projected);
+stateStore.failProjected(new Error('refresh unavailable'));
+assert.equal(stateStore.state.cut, priorCut);
+assert.equal(stateStore.state.projected_activity, null);
+assert.match(stateStore.projectedError, /refresh unavailable/);
+assert.deepEqual(
+  analysisStatusDisplay({ source: 'whisperx', mapping_status: 'needs_confirmation' }, { projection: { unresolved: true } }),
+  {
+    source: 'WhisperX projected activity',
+    mapping: 'Mapping needs confirmation',
+    safety: 'Unresolved speaker — wide chosen to avoid a wrong close-up',
+    tone: 'uncertain',
+  },
+);
 
 assert.deepEqual(
   shotReasonDisplay({ reason_code: 'speaking', reason_label: 'Speaking', reason_detail: 'Peter' }),
