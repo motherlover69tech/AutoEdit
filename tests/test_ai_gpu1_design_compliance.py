@@ -148,7 +148,7 @@ def test_dc_f2_stale_confirmation_record_rejected_by_cut_route():
     (project_dir / "audio" / "ai" / "v1" / "word-timing-review.json").write_text(json.dumps(
         {"status": "PASS", "artifact_version": "run-one", "words": [{"status": "PASS"}] * 3,
          "boundaries": [{"status": "PASS"}] * 6, "peter_acceptance": True}))
-    response = client.post(f"/projects/{pid}/cut", json={})
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code == 409, response.text
 
 
@@ -178,14 +178,14 @@ def test_dc_f3_atomicity_rollback_on_db_failure():
 
     fail_client = TestClient(client.app, raise_server_exceptions=False)
     activity_path = tmp / pid / "audio" / "ai" / "v1" / "activity-whisperx.json"
-    cdl_path = tmp / pid / "edit" / f"cdl_whisperx_run-one.json"
+    cdl_path = tmp / pid / "edit" / "cdl_whisperx_run-one.json"
     real_insert = cuts.insert
 
     def _failing_insert(*a, **k):
         raise RuntimeError("simulated DB failure")
     cuts.insert = staticmethod(_failing_insert)
     try:
-        resp = fail_client.post(f"/projects/{pid}/cut", json={})
+        resp = fail_client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
         assert resp.status_code >= 500, resp.text
     finally:
         cuts.insert = real_insert

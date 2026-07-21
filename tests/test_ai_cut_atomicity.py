@@ -192,7 +192,7 @@ def _assert_failed_publication(
     engine, client, tmp_path: Path, pid: str, prior_bytes: bytes, prior_player_cut: dict
 ) -> None:
     response = TestClient(client.app, raise_server_exceptions=False).post(
-        f"/projects/{pid}/cut", json={}
+        f"/projects/{pid}/cut", json={"analysis_source": "whisperx"}
     )
     assert response.status_code == 500, response.text
     assert (tmp_path / pid / "edit" / "cdl.json").read_bytes() == prior_bytes
@@ -233,7 +233,7 @@ def test_ai_cut_partial_staging_write_leaves_no_temp_file(tmp_path: Path, monkey
         return original(path, data, *args, **kwargs)
 
     monkeypatch.setattr(Path, "write_text", fail_after_partial_write)
-    response = TestClient(client.app, raise_server_exceptions=False).post(f"/projects/{pid}/cut", json={})
+    response = TestClient(client.app, raise_server_exceptions=False).post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code >= 500
     assert not list((tmp_path / pid / "edit").glob("cdl_whisperx_*.tmp"))
     _assert_prior_vad_preserved(engine, client, tmp_path, pid)
@@ -266,7 +266,7 @@ def test_ai_cut_replace_failure_preserves_prior_vad(tmp_path: Path, monkeypatch:
         return original(path, target, *args, **kwargs)
 
     monkeypatch.setattr(Path, "replace", fail_activity_replace)
-    response = TestClient(client.app, raise_server_exceptions=False).post(f"/projects/{pid}/cut", json={})
+    response = TestClient(client.app, raise_server_exceptions=False).post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code >= 500
     _assert_prior_vad_preserved(engine, client, tmp_path, pid)
 
@@ -276,7 +276,7 @@ def test_ai_cut_persists_all_sides_on_success(tmp_path: Path):
     _seed_prior_vad_cut(engine, tmp_path, pid)
     prior_bytes = (tmp_path / pid / "edit" / "cdl.json").read_bytes()
     prior_player_cut = _selected_player_cut(client, pid)
-    response = client.post(f"/projects/{pid}/cut", json={})
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code == 200, response.text
     cdl = response.json()
     assert cdl["analysis_source"] == "whisperx"
@@ -319,7 +319,7 @@ def test_ai_cut_persists_all_sides_on_success(tmp_path: Path):
 
 def test_confirmed_solo_projection_selects_mapped_close_camera(tmp_path: Path):
     _engine, client, pid = _build_confirmed_ai_project(tmp_path)
-    response = client.post(f"/projects/{pid}/cut", json={})
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code == 200, response.text
     clips = response.json()["clips"]
     assert clips[0]["angle_id"] != "wide"
@@ -335,7 +335,7 @@ def test_ai_cut_reports_missing_wide_condition(tmp_path: Path):
         session.execute(angles.delete().where(angles.c.project_id == pid, angles.c.role == "wide"))
         session.commit()
 
-    response = client.post(f"/projects/{pid}/cut", json={})
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code == 422
     detail = response.json()["detail"]
     assert "wide angle" in detail["message"]
@@ -349,7 +349,7 @@ def test_ai_cut_reports_low_confidence_condition_in_api_and_persistence(tmp_path
     artifact["speaker_turns"][0]["confidence"] = 0.1
     result_path.write_text(json.dumps(artifact))
 
-    response = client.post(f"/projects/{pid}/cut", json={})
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code == 200, response.text
     cdl = response.json()
     assert cdl["conditions"]["low_confidence"] is True
@@ -368,7 +368,7 @@ def test_ai_cut_rejects_malformed_artifact_through_api(tmp_path: Path):
     result_path = tmp_path / pid / "audio" / "ai" / "v1" / "result.json"
     result_path.write_text(json.dumps({"schema_version": "1.0", "run_id": "run-one"}))
 
-    response = client.post(f"/projects/{pid}/cut", json={})
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code == 422, response.text
     assert "invalid AI result artifact" in str(response.json()["detail"])
 
@@ -380,7 +380,7 @@ def test_ai_cut_rejects_out_of_range_artifact_through_api(tmp_path: Path):
     artifact["speaker_turns"][0]["start_ms"] = -1
     result_path.write_text(json.dumps(artifact))
 
-    response = client.post(f"/projects/{pid}/cut", json={})
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code == 422, response.text
     assert "invalid AI result artifact" in str(response.json()["detail"])
 
@@ -389,7 +389,7 @@ def test_gate_one_two_field_flag_cannot_authorize_ai_cut(tmp_path: Path):
     _engine, client, pid = _build_confirmed_ai_project(tmp_path)
     gate_path = tmp_path / pid / "audio" / "ai" / "v1" / "word-timing-review.json"
     gate_path.write_text(json.dumps({"status": "PASS", "artifact_version": "run-one"}))
-    response = client.post(f"/projects/{pid}/cut", json={})
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code == 409
     assert "Gate 1" in response.json()["detail"]
 

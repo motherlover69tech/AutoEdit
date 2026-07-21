@@ -41,11 +41,13 @@ from autoedit.conciseness import grade_conciseness
 from autoedit.config import Settings
 from autoedit.cdl_validator import frame_boundary_ms, ms_to_frames as cdl_ms_to_frames, validate_cdl
 from autoedit.cut_engine import DEFAULT_CUT_PARAMS, _with_shot_reason, generate_cdl
+from autoedit.cut_selection import resolve_selected_cut
 from autoedit.db.migrate import run_migrations
 from autoedit.db.schema import (
     angles,
     audio_channels,
     cuts,
+    project_cut_selections,
     jobs,
     notes,
     projects,
@@ -79,6 +81,21 @@ from autoedit.uploads import complete_upload as complete_upload_record
 from autoedit.uploads import create_upload as create_upload_record
 from autoedit.uploads import get_upload_status as get_upload_status_record
 from autoedit.uploads import write_chunk as write_upload_chunk
+
+
+def _emit_cut_event(event: str, *, project_id: str, cut_id: str | None = None,
+                    analysis_source: str | None = None, artifact_version_value: str | None = None,
+                    selection_version: int | None = None, duration_ms: int | None = None,
+                    error_code: str | None = None) -> None:
+    """Emit the bounded, privacy-safe observability contract for cut changes."""
+    fields = {"event": event, "project_id": project_id}
+    optional = {
+        "cut_id": cut_id, "analysis_source": analysis_source,
+        "artifact_version": artifact_version_value, "selection_version": selection_version,
+        "duration_ms": duration_ms, "error_code": error_code,
+    }
+    fields.update({key: value for key, value in optional.items() if value is not None})
+    logging.getLogger("autoedit.cut_selection").info("cut_event %s", json.dumps(fields, sort_keys=True))
 
 
 def _valid_gate_one_acceptance(record: object, current_version: str) -> bool:
@@ -176,6 +193,14 @@ class CutRequest(BaseModel):
 
     name: str = "Rough cut"
     params: dict | None = None
+    analysis_source: Literal["vad", "whisperx"] = "vad"
+
+
+class CutSelectionRequest(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    cut_id: Annotated[str, StringConstraints(min_length=26, max_length=26)]
+    expected_version: int = Field(ge=1, strict=True)
 
 
 class TimeRange(BaseModel):
@@ -1149,20 +1174,7 @@ def create_app(
             )
 
         with Session(app_engine) as session:
-            latest_rough_cut_id = session.execute(
-                select(cuts.c.id)
-                .where(cuts.c.project_id == project_id, cuts.c.kind == "rough")
-                .order_by(cuts.c.created_at.desc(), cuts.c.id.desc())
-                .limit(1)
-            ).scalar_one_or_none()
-            rough_cut = None
-            if latest_rough_cut_id is not None:
-                # MySQL can run out of sort memory when ORDER BY is applied to
-                # rows that include large JSON columns (cdl_json). Sort only
-                # narrow metadata first, then fetch the single selected cut.
-                rough_cut = session.execute(
-                    select(cuts).where(cuts.c.id == latest_rough_cut_id)
-                ).first()
+            rough_cut = resolve_selected_cut(session, project_id)
             angle_rows = session.execute(
                 select(angles)
                 .where(angles.c.project_id == project_id)
@@ -1296,6 +1308,8 @@ def create_app(
                 "name": cut_row["name"],
                 "params": cut_row["params_json"] or DEFAULT_CUT_PARAMS,
                 "clips": cdl.get("clips", []),
+                "analysis_source": cdl.get("analysis_source", "vad"),
+                "selection_version": cut_row.get("selection_version"),
             },
             "quality_default": "proxy",
             "active_lut": active_lut,
@@ -1319,13 +1333,9 @@ def create_app(
             )
         summary = json.loads(summary_path.read_text())
 
-        # Load rough cut CDL
+        # Load the persisted selected cut through the canonical resolver.
         with Session(app_engine) as session:
-            rough_cut = session.execute(
-                select(cuts)
-                .where(cuts.c.project_id == project_id, cuts.c.kind == "rough")
-                .order_by(cuts.c.created_at.desc(), cuts.c.id.desc())
-            ).first()
+            rough_cut = resolve_selected_cut(session, project_id)
 
         if rough_cut is None:
             raise HTTPException(
@@ -1364,6 +1374,9 @@ def create_app(
             }
 
         result: dict = {
+            "selected_cut_id": cut_row["id"],
+            "analysis_source": cdl.get("analysis_source", "vad"),
+            "selection_version": cut_row.get("selection_version"),
             "total_duration_ms": total_duration_ms,
             "summary": summary,
             "cdl_clips": cdl_clips,
@@ -1689,13 +1702,9 @@ def create_app(
 
         project_dir = project_root(app_data_root, project_id)
 
-        # Load rough cut
+        # Load the persisted selected cut.
         with Session(app_engine) as session:
-            rough_cut = session.execute(
-                select(cuts)
-                .where(cuts.c.project_id == project_id, cuts.c.kind == "rough")
-                .order_by(cuts.c.created_at.desc(), cuts.c.id.desc())
-            ).first()
+            rough_cut = resolve_selected_cut(session, project_id)
 
         if rough_cut is None:
             raise HTTPException(status_code=400, detail="rough cut not found — run /cut first")
@@ -1774,6 +1783,8 @@ def create_app(
             "path": str(output),
             "url": url,
             "format": export_format,
+            "cut_id": cut_row["id"],
+            "analysis_source": cdl.get("analysis_source", "vad"),
         }
 
     @app.get("/player/{project_id}")
@@ -2767,6 +2778,7 @@ def create_app(
 
     @app.post("/projects/{project_id}/cut")
     def generate_cut(project_id: str, payload: CutRequest | None = None) -> dict:
+        started_at = time.monotonic()
         project = get_project_record(app_engine, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="project not found")
@@ -2800,30 +2812,50 @@ def create_app(
         # separate recorder/camera, so do not use it directly for speaker cuts.
         speaker_to_angle = _speaker_camera_map(angle_rows, ch_rows)
 
-        # A completed WhisperX artifact becomes authoritative only after the
-        # operator's current, bijective confirmations are present.  Never use
-        # suggested artifact mappings or silently fall back to VAD in this path.
-        try:
-            ai_artifact = load_artifact(project_dir)
-        except ArtifactValidationError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if ai_artifact is not None:
+        # Artifact presence never changes authority: source is explicit.
+        analysis_source = payload.analysis_source if payload else "vad"
+        _emit_cut_event("candidate_requested", project_id=project_id, analysis_source=analysis_source)
+        ai_artifact = None
+        if analysis_source == "whisperx":
+            try:
+                ai_artifact = load_artifact(project_dir)
+            except ArtifactValidationError as exc:
+                _emit_cut_event("candidate_failed", project_id=project_id,
+                                analysis_source=analysis_source, error_code="artifact_validation_failed",
+                                duration_ms=round((time.monotonic() - started_at) * 1000))
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if ai_artifact is None:
+                _emit_cut_event("candidate_failed", project_id=project_id,
+                                analysis_source=analysis_source, error_code="artifact_missing",
+                                duration_ms=round((time.monotonic() - started_at) * 1000))
+                raise HTTPException(status_code=409, detail="WhisperX artifact not found")
             try:
                 ai_artifact = import_artifact(
                     ai_artifact, store=AIArtifactStore(project_dir)
                 ).artifact.model_dump(mode="json")
             except ArtifactImportError as exc:
+                _emit_cut_event("candidate_failed", project_id=project_id,
+                                analysis_source=analysis_source, error_code="artifact_import_failed",
+                                duration_ms=round((time.monotonic() - started_at) * 1000))
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             current_version = artifact_version(ai_artifact)
             gate_one_path = project_dir / "audio" / "ai" / "v1" / "word-timing-review.json"
             try:
                 gate_one = json.loads(gate_one_path.read_text(encoding="utf-8"))
             except (FileNotFoundError, OSError, json.JSONDecodeError) as exc:
+                _emit_cut_event("candidate_failed", project_id=project_id,
+                                analysis_source=analysis_source, artifact_version_value=current_version,
+                                error_code="gate_acceptance_missing",
+                                duration_ms=round((time.monotonic() - started_at) * 1000))
                 raise HTTPException(
                     status_code=409,
                     detail="Gate 1 word-timing acceptance is required before generating the AI cut",
                 ) from exc
             if not _valid_gate_one_acceptance(gate_one, current_version):
+                _emit_cut_event("candidate_failed", project_id=project_id,
+                                analysis_source=analysis_source, artifact_version_value=current_version,
+                                error_code="gate_acceptance_invalid",
+                                duration_ms=round((time.monotonic() - started_at) * 1000))
                 raise HTTPException(
                     status_code=409,
                     detail="Gate 1 word-timing acceptance is required for the current AI artifact",
@@ -2839,6 +2871,10 @@ def create_app(
             confirmations = {row._mapping["diarizer_speaker_id"]: row._mapping for row in confirmation_rows}
             observed = {str(turn["diarizer_speaker_id"]) for turn in ai_artifact.get("diarization_turns", [])}
             if observed != set(confirmations):
+                _emit_cut_event("candidate_failed", project_id=project_id,
+                                analysis_source=analysis_source, artifact_version_value=current_version,
+                                error_code="confirmation_missing",
+                                duration_ms=round((time.monotonic() - started_at) * 1000))
                 raise HTTPException(
                     status_code=409,
                     detail="current speaker confirmations are required before generating the AI cut",
@@ -2865,6 +2901,10 @@ def create_app(
             try:
                 timeline = activity_from_turns(turns, timeline_end_ms=int(ai_artifact["timeline_end_ms"]), confidence_threshold=0.5)
             except (KeyError, TypeError, ValueError) as exc:
+                _emit_cut_event("candidate_failed", project_id=project_id,
+                                analysis_source=analysis_source, artifact_version_value=current_version,
+                                error_code="activity_invalid",
+                                duration_ms=round((time.monotonic() - started_at) * 1000))
                 raise HTTPException(status_code=422, detail=f"invalid AI activity artifact: {exc}") from exc
             activity = {"timeline": timeline, "total_duration_ms": int(ai_artifact["timeline_end_ms"]),
                         "source": "whisperx", "artifact_version": current_version}
@@ -2897,6 +2937,11 @@ def create_app(
             "off_camera": any(item.get("reason") == "off_camera:wide" for item in timeline),
         }
         if projection_conditions["missing_wide"] and ai_artifact is not None:
+            _emit_cut_event("candidate_failed", project_id=project_id,
+                            analysis_source=analysis_source,
+                            artifact_version_value=artifact_version(ai_artifact),
+                            error_code="missing_wide",
+                            duration_ms=round((time.monotonic() - started_at) * 1000))
             raise HTTPException(
                 status_code=422,
                 detail={
@@ -2918,6 +2963,9 @@ def create_app(
                 params=cut_params,
             )
         except ValueError as exc:
+            _emit_cut_event("candidate_failed", project_id=project_id,
+                            analysis_source=analysis_source, error_code="cdl_generation_failed",
+                            duration_ms=round((time.monotonic() - started_at) * 1000))
             raise HTTPException(status_code=422, detail=f"cut generation failed closed: {exc}") from exc
         cdl["project_id"] = project_id
 
@@ -3090,24 +3138,35 @@ def create_app(
         )
         cdl["validation"] = cut_validation
         if not cut_validation.get("valid"):
+            _emit_cut_event("candidate_failed", project_id=project_id,
+                            analysis_source=analysis_source,
+                            artifact_version_value=cdl.get("analysis_artifact_version"),
+                            error_code="cdl_validation_failed",
+                            duration_ms=round((time.monotonic() - started_at) * 1000))
             raise HTTPException(
                 status_code=422,
                 detail=f"cut generation failed closed: {cut_validation.get('error', 'invalid CDL')}",
             )
-        cdl["analysis_source"] = "whisperx" if ai_artifact is not None else "vad"
+        cdl["analysis_source"] = analysis_source
         cdl["conditions"] = projection_conditions
         if ai_artifact is not None:
             cdl["analysis_artifact_version"] = artifact_version(ai_artifact)
 
-        # VAD remains the selected rough cut. An AI candidate is persisted as
-        # a separate versioned cut and must not replace player selection.
+        # VAD and WhisperX candidates are immutable, versioned files.
+        cut_id = new_ulid()
         edit_dir = project_dir / "edit"
         edit_dir.mkdir(parents=True, exist_ok=True)
-        cdl_path = (
-            edit_dir / f"cdl_whisperx_{cdl['analysis_artifact_version']}.json"
-            if ai_artifact is not None
-            else edit_dir / "cdl.json"
-        )
+
+        # Every candidate gets its own file, including repeated generations
+        # from the same WhisperX artifact.  Candidate publication must never
+        # overwrite an earlier immutable candidate.
+        if ai_artifact is not None:
+            legacy_candidate_path = edit_dir / f"cdl_whisperx_{cdl['analysis_artifact_version']}.json"
+            # Preserve the established first-publication filename while making
+            # every subsequent candidate immutable and independently addressable.
+            cdl_path = legacy_candidate_path if not legacy_candidate_path.exists() else edit_dir / f"cdl_whisperx_{cut_id}.json"
+        else:
+            cdl_path = edit_dir / f"cdl_vad_{cut_id}.json"
         prior_cdl = cdl_path.read_bytes() if cdl_path.is_file() else None
 
         # The AI activity artifact, CDL file, and DB cut row are one publication
@@ -3129,7 +3188,6 @@ def create_app(
             effective_params.update(cut_params)
 
         cut_name = payload.name if payload else "Rough cut"
-        cut_id = new_ulid()
         tmp_paths: list[Path] = []
 
         def _restore(path: Path, prior: bytes | None) -> None:
@@ -3138,34 +3196,40 @@ def create_app(
             else:
                 path.write_bytes(prior)
 
+        mirror_path = edit_dir / "cdl.json"
+        prior_mirror = mirror_path.read_bytes() if mirror_path.is_file() else None
         with Session(app_engine) as session:
             try:
-                # Write the candidate bytes before touching the DB.  A failed
-                # candidate write therefore cannot create an orphan DB row.
+                # Write staged candidate bytes before touching the DB.
                 tmp_cdl = cdl_path.with_suffix(cdl_path.suffix + ".tmp")
                 tmp_paths.append(tmp_cdl)
-                # Track the staging path before writing: a filesystem error
-                # can leave a truncated temporary file behind.
                 tmp_cdl.write_text(json.dumps(cdl, indent=2) + "\n")
                 tmp_activity = None
                 if activity_path is not None:
                     tmp_activity = activity_path.with_suffix(activity_path.suffix + ".tmp")
                     tmp_paths.append(tmp_activity)
                     tmp_activity.write_text(json.dumps(activity, indent=2) + "\n")
-
-                session.execute(
-                    cuts.insert().values(
-                        id=cut_id,
-                        project_id=project_id,
-                        name=cut_name,
-                        kind="ai" if ai_artifact is not None else "rough",
-                        params_json=effective_params,
-                        cdl_json=cdl,
-                    )
-                )
-                # Keep the insert uncommitted until both artifact replacements
-                # succeed.  This also makes a commit failure recoverable.
-                tmp_cdl.replace(cdl_path)
+                session.execute(cuts.insert().values(
+                    id=cut_id, project_id=project_id, name=cut_name,
+                    kind="ai" if ai_artifact is not None else "rough",
+                    params_json=effective_params, cdl_json=cdl,
+                ))
+                selected = session.execute(select(project_cut_selections).where(
+                    project_cut_selections.c.project_id == project_id
+                )).first()
+                if selected is None and analysis_source == "vad":
+                    session.execute(project_cut_selections.insert().values(
+                        project_id=project_id, cut_id=cut_id, selected_by="system", version=1
+                    ))
+                    # Keep the immutable candidate and publish a separate
+                    # compatibility mirror for the initial selected cut.
+                    tmp_cdl.replace(cdl_path)
+                    mirror_tmp = mirror_path.with_suffix(mirror_path.suffix + ".tmp")
+                    tmp_paths.append(mirror_tmp)
+                    mirror_tmp.write_text(json.dumps(cdl, indent=2) + "\n")
+                    mirror_tmp.replace(mirror_path)
+                else:
+                    tmp_cdl.replace(cdl_path)
                 if tmp_activity is not None:
                     assert activity_path is not None
                     tmp_activity.replace(activity_path)
@@ -3173,15 +3237,111 @@ def create_app(
             except Exception:
                 session.rollback()
                 _restore(cdl_path, prior_cdl)
+                _restore(mirror_path, prior_mirror)
                 if activity_path is not None:
                     _restore(activity_path, prior_activity)
+                _emit_cut_event("candidate_failed", project_id=project_id,
+                                cut_id=cut_id, analysis_source=analysis_source,
+                                artifact_version_value=cdl.get("analysis_artifact_version"),
+                                error_code="publication_failed",
+                                duration_ms=round((time.monotonic() - started_at) * 1000))
                 raise
             finally:
                 for tmp_path in tmp_paths:
                     tmp_path.unlink(missing_ok=True)
 
         _check_and_update_status(project_id)
-        return cdl
+        with Session(app_engine) as session:
+            selected = resolve_selected_cut(session, project_id)
+        _emit_cut_event(
+            "candidate_generated", project_id=project_id, cut_id=cut_id,
+            analysis_source=analysis_source,
+            artifact_version_value=cdl.get("analysis_artifact_version"),
+            selection_version=selected._mapping.get("selection_version") if selected else None,
+            duration_ms=round((time.monotonic() - started_at) * 1000),
+        )
+        return {**cdl, "cut_id": cut_id, "analysis_source": analysis_source,
+                "selected": bool(selected and selected._mapping["id"] == cut_id),
+                "selection_version": selected._mapping.get("selection_version") if selected else None}
+
+    @app.get("/projects/{project_id}/cuts")
+    def list_project_cuts(project_id: str) -> dict:
+        if get_project_record(app_engine, project_id) is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        with Session(app_engine) as session:
+            selected = resolve_selected_cut(session, project_id)
+            rows = session.execute(select(cuts).where(cuts.c.project_id == project_id).order_by(cuts.c.created_at.desc(), cuts.c.id.desc()).limit(100)).all()
+            version = selected._mapping.get("selection_version") if selected else None
+        return {"selection_version": version, "cuts": [{
+            "cut_id": row._mapping["id"], "name": row._mapping["name"], "kind": row._mapping["kind"],
+            "analysis_source": (row._mapping["cdl_json"] or {}).get("analysis_source", "vad"),
+            "analysis_artifact_version": (row._mapping["cdl_json"] or {}).get("analysis_artifact_version"),
+            "params": row._mapping["params_json"], "created_at": row._mapping["created_at"].isoformat() if row._mapping["created_at"] else None,
+            "validation": (row._mapping["cdl_json"] or {}).get("validation"),
+            "is_selected": bool(selected and selected._mapping["id"] == row._mapping["id"]),
+        } for row in rows]}
+
+    @app.put("/projects/{project_id}/cut-selection")
+    def select_project_cut(project_id: str, payload: CutSelectionRequest, request: Request) -> dict:
+        if get_project_record(app_engine, project_id) is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        operator = (getattr(request.state, "session", None) or {}).get("user_id", "operator")
+        project_dir = project_root(app_data_root, project_id)
+        _emit_cut_event("selection_requested", project_id=project_id, cut_id=payload.cut_id)
+        with Session(app_engine) as session:
+            current = session.execute(select(project_cut_selections).where(project_cut_selections.c.project_id == project_id)).first()
+            if current is None:
+                if payload.expected_version != 1:
+                    _emit_cut_event("selection_conflicted", project_id=project_id,
+                                    cut_id=payload.cut_id, error_code="optimistic_conflict",
+                                    selection_version=1)
+                    raise HTTPException(status_code=409, detail="selection version conflict")
+                next_version = 1
+            else:
+                if current._mapping["version"] != payload.expected_version:
+                    _emit_cut_event("selection_conflicted", project_id=project_id,
+                                    cut_id=payload.cut_id, error_code="optimistic_conflict",
+                                    selection_version=current._mapping["version"])
+                    raise HTTPException(status_code=409, detail="selection version conflict")
+                if current._mapping["cut_id"] == payload.cut_id:
+                    return {"project_id": project_id, "cut_id": payload.cut_id, "version": payload.expected_version}
+                next_version = current._mapping["version"] + 1
+            candidate = session.execute(select(cuts).where(cuts.c.id == payload.cut_id, cuts.c.project_id == project_id)).first()
+            if candidate is None:
+                raise HTTPException(status_code=400, detail="cut does not belong to project")
+            cdl = candidate._mapping["cdl_json"] or {}
+            if not validate_cdl(cdl, get_project_record(app_engine, project_id)["fps_num"], get_project_record(app_engine, project_id)["fps_den"]).get("valid"):
+                raise HTTPException(status_code=422, detail="invalid candidate CDL")
+            mirror = project_dir / "edit" / "cdl.json"
+            old = mirror.read_bytes() if mirror.is_file() else None
+            try:
+                mirror.parent.mkdir(parents=True, exist_ok=True)
+                tmp = mirror.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(cdl, indent=2) + "\n")
+                tmp.replace(mirror)
+                values = {"cut_id": payload.cut_id, "selected_by": str(operator), "version": next_version}
+                if current is None:
+                    session.execute(project_cut_selections.insert().values(project_id=project_id, **values))
+                else:
+                    session.execute(project_cut_selections.update().where(project_cut_selections.c.project_id == project_id).values(**values))
+                session.commit()
+            except Exception:
+                session.rollback()
+                if old is None:
+                    mirror.unlink(missing_ok=True)
+                else:
+                    mirror.write_bytes(old)
+                _emit_cut_event("selection_rolled_back", project_id=project_id,
+                                cut_id=payload.cut_id,
+                                analysis_source=cdl.get("analysis_source", "vad"),
+                                selection_version=current._mapping["version"] if current else None,
+                                error_code="selection_publication_failed")
+                raise
+        _emit_cut_event(
+            "selection_changed", project_id=project_id, cut_id=payload.cut_id,
+            analysis_source=cdl.get("analysis_source", "vad"), selection_version=next_version,
+        )
+        return {"project_id": project_id, "cut_id": payload.cut_id, "analysis_source": cdl.get("analysis_source", "vad"), "version": next_version}
 
     @app.post("/projects/{project_id}/cut/review")
     async def review_cut(project_id: str) -> dict:
@@ -3192,14 +3352,12 @@ def create_app(
 
         project_dir = project_root(app_data_root, project_id)
 
-        # Load CDL
-        cdl_path = project_dir / "edit" / "cdl.json"
-        if not cdl_path.is_file():
-            raise HTTPException(
-                status_code=400,
-                detail="cdl.json not found — run /cut first",
-            )
-        cdl = json.loads(cdl_path.read_text())
+        # Load the selected cut through the canonical resolver.
+        with Session(app_engine) as session:
+            selected_cut = resolve_selected_cut(session, project_id)
+        if selected_cut is None:
+            raise HTTPException(status_code=400, detail="selected cut not found — run /cut first")
+        cdl = selected_cut._mapping["cdl_json"] or {}
 
         # Load activity timeline
         activity_path = project_dir / "audio" / "activity.json"
@@ -3231,6 +3389,8 @@ def create_app(
             return {
                 "reviewed": False,
                 "reason": "LLM not configured (set OLLAMA_BASE_URL and LLM_MODEL)",
+                "cut_id": selected_cut._mapping["id"],
+                "analysis_source": cdl.get("analysis_source", "vad"),
             }
 
         from autoedit.cut_review import review_cut_quality, format_cut_review_for_ui
@@ -3241,6 +3401,8 @@ def create_app(
             # Optionally save review notes to project
             return {
                 "reviewed": True,
+                "cut_id": selected_cut._mapping["id"],
+                "analysis_source": cdl.get("analysis_source", "vad"),
                 "overall_rating": review.get("overall_rating"),
                 "summary": review.get("summary"),
                 "issues": review.get("issues", []),
@@ -3250,6 +3412,8 @@ def create_app(
             return {
                 "reviewed": False,
                 "reason": "LLM review failed or unavailable",
+                "cut_id": selected_cut._mapping["id"],
+                "analysis_source": cdl.get("analysis_source", "vad"),
             }
 
     def _transcribe_audio_locked(project_id: str) -> dict:

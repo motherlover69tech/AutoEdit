@@ -144,6 +144,15 @@ cuts = Table(
     Index("ix_cuts_project_kind_created", "project_id", "kind", "created_at", "id"),
 )
 
+project_cut_selections = Table(
+    "project_cut_selections", metadata,
+    Column("project_id", String(26), ForeignKey("projects.id"), primary_key=True),
+    Column("cut_id", String(26), ForeignKey("cuts.id"), nullable=False),
+    Column("selected_by", String(128), nullable=False),
+    Column("selected_at", DateTime, nullable=False, server_default=func.now()),
+    Column("version", Integer, nullable=False, server_default="1"),
+)
+
 notes = Table(
     "notes",
     metadata,
