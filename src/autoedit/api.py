@@ -10,6 +10,8 @@ from typing import Annotated, Literal
 
 import json
 import shutil
+import subprocess
+import tempfile
 import threading
 import time
 from datetime import UTC, datetime
@@ -1100,11 +1102,22 @@ def create_app(
             raise HTTPException(status_code=400, detail="completed AI artifact not found")
         current_version = artifact_version(artifact)
         snippet_map = snippets(artifact)
+        artifact_mappings = {
+            str(item.get("diarizer_speaker_id")): item
+            for item in artifact.get("speaker_mappings", [])
+            if isinstance(item, dict) and item.get("diarizer_speaker_id")
+        }
         with Session(app_engine) as session:
             camera_rows = session.execute(select(angles).where(angles.c.project_id == project_id)).all()
-            speaker_rows = session.execute(select(audio_channels.c.speaker_label).where(audio_channels.c.project_id == project_id)).all()
+            speaker_rows = session.execute(select(audio_channels).where(audio_channels.c.project_id == project_id)).all()
             rows = session.execute(select(speaker_confirmations).where(speaker_confirmations.c.project_id == project_id)).all()
         cameras = [{"id": row._mapping["id"], "label": row._mapping["label"], "role": row._mapping["role"]} for row in camera_rows]
+        camera_ids = {item["id"] for item in cameras}
+        suggested_camera_by_speaker = {
+            str(row._mapping["speaker_label"]): row._mapping["source_angle_id"]
+            for row in speaker_rows
+            if row._mapping["speaker_label"] and row._mapping["source_angle_id"] in camera_ids
+        }
         stable_speakers = sorted({str(row._mapping["speaker_label"]) for row in speaker_rows if row._mapping["speaker_label"]})
         confirmations = []
         for row in rows:
@@ -1118,7 +1131,17 @@ def create_app(
         for label, turns in sorted(snippet_map.items()):
             current = next((item for item in confirmations if item["diarizer_speaker_id"] == label and item["is_current"]), None)
             historical = next((item for item in confirmations if item["diarizer_speaker_id"] == label), None)
-            labels.append({"diarizer_speaker_id": label, "status": current["status"] if current else ("stale" if historical else "needs_confirmation"), "confirmation": current or historical, "snippets": [{**turn, "url": f"/projects/{project_id}/media/audio/program.m4a?start_ms={turn['start_ms']}&end_ms={turn['end_ms']}"} for turn in turns]})
+            suggestion = artifact_mappings.get(label, {})
+            status = current["status"] if current else ("stale" if historical else ("suggested" if suggestion.get("status") == "suggested" else "needs_confirmation"))
+            labels.append({
+                "diarizer_speaker_id": label,
+                "status": status,
+                "confirmation": current or historical,
+                "suggested_speaker_id": suggestion.get("speaker_id") if status == "suggested" else None,
+                "suggested_camera_id": (suggestion.get("camera_id") or suggested_camera_by_speaker.get(str(suggestion.get("speaker_id")))) if status == "suggested" else None,
+                "confidence": suggestion.get("confidence") if status == "suggested" and isinstance(suggestion.get("confidence"), (int, float)) else None,
+                "snippets": [{**turn, "url": f"/projects/{project_id}/media/audio/program.m4a?start_ms={turn['start_ms']}&end_ms={turn['end_ms']}"} for turn in turns],
+            })
         return {"artifact_version": current_version, "run_id": current_version, "speakers": stable_speakers, "cameras": cameras, "labels": labels}
 
     @app.put("/projects/{project_id}/speaker-confirmations")
@@ -2422,6 +2445,41 @@ def create_app(
             raise HTTPException(status_code=404, detail="file not found")
         if not _is_db_known_media(project_id, kind, filename):
             raise HTTPException(status_code=404, detail="file not found")
+
+        start_raw = request.query_params.get("start_ms")
+        end_raw = request.query_params.get("end_ms")
+        if start_raw is not None or end_raw is not None:
+            if kind != "audio" or filename != "program.m4a" or start_raw is None or end_raw is None:
+                raise HTTPException(status_code=400, detail="bounded ranges are only supported for program audio")
+            try:
+                start_ms, end_ms = int(start_raw), int(end_raw)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="snippet range must be integer milliseconds") from exc
+            artifact = load_artifact(project_dir, strict=False)
+            try:
+                timeline_end_ms = int(artifact["timeline_end_ms"]) if artifact else 0
+            except (KeyError, TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="snippet timeline is unavailable") from exc
+            if not (0 <= start_ms < end_ms <= timeline_end_ms):
+                raise HTTPException(status_code=400, detail="snippet range is outside the program timeline")
+            excerpt_dir = project_dir / "audio" / "snippets"
+            excerpt_dir.mkdir(parents=True, exist_ok=True)
+            excerpt_path = excerpt_dir / f"program-{start_ms}-{end_ms}.m4a"
+            if not excerpt_path.is_file():
+                fd, tmp_name = tempfile.mkstemp(prefix="snippet-", suffix=".m4a", dir=excerpt_dir)
+                import os
+                os.close(fd)
+                try:
+                    subprocess.run(
+                        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", f"{start_ms / 1000:.3f}", "-to", f"{end_ms / 1000:.3f}", "-i", str(resolved), "-vn", "-c:a", "aac", "-movflags", "+faststart", "-y", tmp_name],
+                        check=True, capture_output=True, text=True,
+                    )
+                    Path(tmp_name).replace(excerpt_path)
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    raise HTTPException(status_code=500, detail="unable to create bounded audio snippet") from exc
+                finally:
+                    Path(tmp_name).unlink(missing_ok=True)
+            return FileResponse(str(excerpt_path), media_type="audio/mp4", headers={"Cache-Control": "private, max-age=3600"})
 
         return FileResponse(
             str(resolved),

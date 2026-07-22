@@ -90,8 +90,13 @@
 
       <div class="section-head"><span class="sec-num">07</span><h2>Speaker confirmation</h2></div>
       <article class="card" id="speakerConfirmationPanel">
-        <p class="body-copy">Listen to bounded program-audio snippets and explicitly associate each anonymous voice with one existing person and close camera. This does not change sync. Nothing is selected by default.</p>
-        <div id="speakerConfirmation" aria-live="polite"><p class="mono-note">Complete an AI run to review anonymous voices.</p></div>
+        <p class="body-copy">Listen to bounded program-audio snippets and explicitly associate each anonymous voice with one existing person and close camera. Confirming identity does not change audio sync. Rerunning rebuilds the whole cut deterministically; your current cut stays unchanged until you save a candidate in the review player.</p>
+        <div id="speakerConfirmation" aria-live="polite"><p class="mono-note">Loading speaker confirmation…</p></div>
+        <div class="confirmation-actions" aria-live="polite">
+          <button id="useVadBaselineBtn" type="button" class="btn btn-quiet" disabled title="Select a project with processed activity first">Use VAD baseline</button>
+          <button id="regenerateWhisperxBtn" type="button" class="btn btn-quiet" disabled title="Complete the AI artifact, Gate 1, and current confirmations first">Regenerate with WhisperX</button>
+          <p class="mono-note">Both actions create a new candidate cut. Your current cut is unchanged until you save it in the review player.</p>
+        </div>
       </article>
     </section>
 

@@ -156,7 +156,11 @@ textarea:focus { outline: none; border-color: var(--red); }
 .confirmation-snippet { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .confirmation-snippet audio { max-width: 100%; height: 32px; }
 .confirmation-row .field { max-width: 420px; }
+.confirmation-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.confirmation-actions .mono-note { flex-basis: 100%; }
+.badge.suggested { color: var(--warn); border-color: rgba(201,162,39,.45); }
 @media (max-width: 840px) { .confirmation-row { display: grid; } .confirmation-snippet audio { width: 100%; } }
+@media (max-width: 640px) { .confirmation-actions button { width: 100%; } .confirmation-actions { display: grid; } }
 
 /* ── Status line ──────────────────────────────────────── */
 .status-line { padding: 12px var(--pad); font-family: var(--mono); font-size: 12.5px; border-bottom: 1px solid var(--line); }

@@ -1,3 +1,11 @@
+import {
+  speakerBadge,
+  suggestedPrefill,
+  confirmationSaveDisabled,
+  confidenceLabel,
+  regenerationOutcome,
+} from './speaker_mapping_logic.js';
+
 const ROLES = [
   { key: 'cam_left', label: 'A · CAMERA', full: 'Camera A', defaultLabel: 'Camera A', colour: 'var(--presenter)', hint: 'Camera source / close-up. Not a speaker assignment.' },
   { key: 'cam_right', label: 'B · CAMERA', full: 'Camera B', defaultLabel: 'Camera B', colour: 'var(--interviewee)', hint: 'Camera source / close-up. Not a speaker assignment.' },
@@ -387,24 +395,60 @@ async function saveChannelMapping() {
   if (startBtn) startBtn.style.display = 'inline-block';
 }
 
+async function regenerateCandidate(source, button) {
+  if (!state.activeProject) return;
+  const oldText = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Regenerating…';
+  const target = qs('speakerConfirmation');
+  target.setAttribute('aria-busy', 'true');
+  try {
+    await api(`/projects/${state.activeProject.id}/cut`, { method: 'POST', body: JSON.stringify({ analysis_source: source }) });
+    target.insertAdjacentHTML('afterbegin', `<p class="status-line ok">${regenerationOutcome(200)}</p>`);
+  } catch (err) {
+    const conflict = String(err.message).includes('409') || String(err.message).toLowerCase().includes('confirmation');
+    target.insertAdjacentHTML('afterbegin', `<p class="status-line">${escapeHtml(regenerationOutcome(conflict ? 409 : 500, err.message))}</p>`);
+  } finally {
+    target.setAttribute('aria-busy', 'false');
+    button.disabled = false;
+    button.textContent = oldText;
+  }
+}
+
 async function loadSpeakerConfirmations() {
   const target = qs('speakerConfirmation');
   if (!target || !state.activeProject) return;
   try {
     const data = await api(`/projects/${state.activeProject.id}/speaker-confirmations`);
-    if (!data.labels.length) { target.innerHTML = '<p class="mono-note">No anonymous turns are available.</p>'; return; }
+    if (!data.labels.length) { target.innerHTML = '<p class="mono-note">No anonymous turns are available. Complete diarization before confirming identity.</p>'; return; }
     target.innerHTML = data.labels.map((item) => {
       const confirmation = item.confirmation || {};
-      const options = data.speakers.map((speaker) => `<option value="${escapeHtml(speaker)}" ${confirmation.speaker_id === speaker ? 'selected' : ''}>${escapeHtml(speaker)}</option>`).join('');
-      const cameras = data.cameras.map((camera) => `<option value="${escapeHtml(camera.id)}" ${confirmation.camera_id === camera.id ? 'selected' : ''}>${escapeHtml(camera.label)} (${escapeHtml(camera.role)})</option>`).join('');
+      const suggestion = suggestedPrefill(item);
+      const badge = speakerBadge(item.status);
+      const suggestedSpeaker = suggestion.speakerId;
+      const suggestedCamera = suggestion.cameraId;
+      const options = data.speakers.map((speaker) => `<option value="${escapeHtml(speaker)}" ${((confirmation.speaker_id || suggestedSpeaker) === speaker) ? 'selected' : ''}>${escapeHtml(speaker)}</option>`).join('');
+      const cameras = data.cameras.map((camera) => `<option value="${escapeHtml(camera.id)}" ${((confirmation.camera_id || suggestedCamera) === camera.id) ? 'selected' : ''}>${escapeHtml(camera.label)} (${escapeHtml(camera.role)})</option>`).join('');
       const snippetsHtml = item.snippets.map((clip) => `<div class="confirmation-snippet"><audio controls preload="none" src="${escapeHtml(clip.url)}" aria-label="Program audio snippet ${escapeHtml(clip.start_ms)} to ${escapeHtml(clip.end_ms)} milliseconds"></audio><span class="mono-note">${escapeHtml(clip.start_ms)}–${escapeHtml(clip.end_ms)} ms</span></div>`).join('');
-      return `<fieldset class="confirmation-row" data-confirm-label="${escapeHtml(item.diarizer_speaker_id)}"><legend><b>${escapeHtml(item.diarizer_speaker_id)}</b> <span class="badge ${item.status === 'confirmed' ? 'ok' : item.status === 'stale' ? 'warn' : 'neutral'}">${escapeHtml(item.status)}</span></legend><p class="mono-note">${item.status === 'stale' ? 'This mapping is stale for the current AI run.' : 'Confirm who this voice belongs to. This does not change sync.'}</p><div class="confirmation-snippets">${snippetsHtml || '<span class="mono-note">No bounded snippets available; confirmation is disabled.</span>'}</div><label class="field">Existing speaker<select data-confirm-speaker><option value="">Choose a speaker…</option>${options}</select></label><label class="field">Close camera<select data-confirm-camera><option value="">Choose a camera…</option>${cameras}</select></label><button class="btn btn-primary btn-sm" type="button" data-confirm-save ${item.status === 'confirmed' && item.confirmation ? '' : 'disabled'}>Save confirmed mapping</button></fieldset>`;
+      return `<fieldset class="confirmation-row" data-confirm-label="${escapeHtml(item.diarizer_speaker_id)}"><legend><b>${escapeHtml(item.diarizer_speaker_id)}</b> <span class="badge ${badge.tone}">${badge.label}</span></legend><p class="mono-note">${item.status === 'suggested' ? 'Automatic suggestion — explicitly confirm before saving.' : item.status === 'stale' ? 'This mapping is stale for the current AI run.' : 'Confirm identity only; this does not change sync.'}</p><div class="confirmation-snippets">${snippetsHtml || '<span class="mono-note">No bounded snippets available; confirmation is disabled.</span>'}</div><p class="mono-note">Confidence: ${confidenceLabel(item.confidence)}</p><label class="field">Existing speaker<select data-confirm-speaker><option value="">Choose a speaker…</option>${options}</select></label><label class="field">Close camera<select data-confirm-camera><option value="">Choose a camera…</option>${cameras}</select></label><button class="btn btn-primary btn-sm" type="button" data-confirm-save disabled title="Choose a speaker and camera, with at least two snippets">Save confirmed mapping</button></fieldset>`;
     }).join('');
+    const vadButton = qs('useVadBaselineBtn');
+    const whisperButton = qs('regenerateWhisperxBtn');
+    if (vadButton) {
+      vadButton.disabled = false;
+      vadButton.onclick = () => regenerateCandidate('vad', vadButton);
+    }
+    if (whisperButton) {
+      const readyForWhisper = data.labels.length > 0 && data.labels.every((item) => item.status === 'confirmed') && data.cameras.some((camera) => camera.role === 'wide');
+      whisperButton.disabled = !readyForWhisper;
+      whisperButton.title = readyForWhisper ? 'Creates a candidate; current cut remains unchanged' : 'Requires Gate 1, a wide camera, and confirmed mappings for every anonymous voice';
+      whisperButton.onclick = () => regenerateCandidate('whisperx', whisperButton);
+    }
     target.querySelectorAll('[data-confirm-label]').forEach((row) => {
       const speaker = row.querySelector('[data-confirm-speaker]');
       const camera = row.querySelector('[data-confirm-camera]');
       const button = row.querySelector('[data-confirm-save]');
-      const refresh = () => { button.disabled = !speaker.value || !camera.value || row.querySelectorAll('audio').length < 2; };
+      const refresh = () => { button.disabled = confirmationSaveDisabled({ speakerId: speaker.value, cameraId: camera.value, snippetCount: row.querySelectorAll('audio').length }); };
       speaker.addEventListener('change', refresh); camera.addEventListener('change', refresh); refresh();
       button.addEventListener('click', async () => {
         button.disabled = true;
