@@ -72,6 +72,14 @@ def test_authenticated_player_shell_contains_media_elements_and_assets(auth_play
     assert 'id="analysisSource"' in html
     assert 'id="analysisMapping"' in html
     assert 'id="analysisSafety"' in html
+    assert 'id="currentCutLabel"' in html
+    assert 'id="cutSourceGroup"' in html
+    assert 'VAD baseline' in html
+    assert 'WhisperX resolved turns' in html
+    assert 'id="cutPreviewBanner"' in html
+    assert 'id="saveCutButton"' in html
+    assert 'id="discardCutButton"' in html
+    assert 'aria-live="polite"' in html
     assert "player.js" in html
     assert "styles.css" in html
 

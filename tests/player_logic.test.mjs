@@ -22,6 +22,9 @@ import {
   normalizeProjectedActivity,
   activityStatusDisplay,
   validateMasterTimeSpans,
+  formatConfidence,
+  sourceChoiceDisplay,
+  createCutPreviewState,
 } from '../src/autoedit/web/player.js';
 
 const clips = [
@@ -89,6 +92,23 @@ assert.deepEqual(
     tone: 'uncertain',
   },
 );
+assert.equal(formatConfidence(0.934), '93%');
+assert.equal(formatConfidence(null), 'Not reported');
+assert.equal(formatConfidence(1.2), 'Not reported');
+assert.equal(sourceChoiceDisplay('vad'), 'VAD baseline');
+assert.equal(sourceChoiceDisplay('whisperx'), 'WhisperX resolved turns');
+const previewState = createCutPreviewState({ cut_id: 'selected', clips }, 3);
+const candidate = { cut_id: 'candidate', analysis_source: 'whisperx', clips };
+previewState.previewCut(candidate);
+assert.equal(previewState.selected.cut_id, 'selected');
+assert.equal(previewState.preview.cut_id, 'candidate');
+previewState.discard();
+assert.equal(previewState.preview, null);
+previewState.previewCut(candidate);
+assert.throws(() => previewState.commit(candidate, 3), /stale/);
+previewState.commit(candidate, 4);
+assert.equal(previewState.selected.cut_id, 'candidate');
+assert.equal(previewState.preview, null);
 
 assert.deepEqual(
   shotReasonDisplay({ reason_code: 'speaking', reason_label: 'Speaking', reason_detail: 'Peter' }),

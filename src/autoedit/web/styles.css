@@ -194,6 +194,22 @@ textarea:focus { outline: none; border-color: var(--red); }
 .analysis-status strong { font-family: var(--mono); font-size: 11px; color: var(--t-hi); }
 .analysis-status strong[data-tone="uncertain"] { color: var(--warn); }
 @media (max-width: 640px) { .analysis-status { grid-template-columns: 1fr; } }
+.cut-review-panel { margin: 14px var(--pad, 20px) 0; padding: 16px; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--r-md); }
+.cut-review-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.cut-review-heading h2 { margin-bottom: 4px; }
+.cut-confidence { font-family: var(--mono); font-size: 11px; color: var(--t-mid); white-space: nowrap; }
+.cut-source-group { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; margin-top: 14px; padding: 0; border: 0; }
+.cut-source-group legend { width: 100%; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--t-low); }
+.cut-source-group label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
+.cut-source-group input { width: auto; accent-color: var(--red); }
+.cut-source-group input:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid var(--red-bright); outline-offset: 3px; }
+.cut-preview-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 15px; padding: 12px; border: 1px solid rgba(201,162,39,.45); border-left: 4px solid var(--warn); border-radius: var(--r-sm); background: rgba(201,162,39,.1); color: var(--t-hi); }
+.cut-preview-banner strong { font-family: var(--mono); font-size: 12px; }
+.cut-preview-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.cut-review-panel [hidden] { display: none !important; }
+@media (max-width: 840px) { .cut-review-panel { margin-inline: 20px; } .cut-preview-banner { align-items: stretch; flex-direction: column; } }
+@media (max-width: 640px) { .cut-review-heading { align-items: flex-start; flex-direction: column; } .cut-source-group { align-items: stretch; flex-direction: column; } .cut-preview-actions { display: grid; grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
 
 /* ── Audio transport ───────────────────────────────────── */
 .program-audio { width: 100%; margin: 14px 0; }

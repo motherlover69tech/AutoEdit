@@ -72,6 +72,30 @@
         <div><span class="analysis-label">Safety</span><strong id="analysisSafety" data-tone="confirmed">Loading…</strong></div>
       </section>
 
+      <section class="cut-review-panel" aria-label="Cut source and preview">
+        <div class="cut-review-heading">
+          <div>
+            <h2>Cut review</h2>
+            <p class="mono-note">Current cut: <strong id="currentCutLabel">Loading…</strong></p>
+          </div>
+          <span id="cutConfidence" class="cut-confidence">Confidence: Not reported</span>
+        </div>
+        <fieldset id="cutSourceGroup" class="cut-source-group">
+          <legend>Analysis source</legend>
+          <label><input type="radio" name="analysisSourceChoice" value="vad" checked> <span>VAD baseline</span></label>
+          <label><input type="radio" name="analysisSourceChoice" value="whisperx"> <span>WhisperX resolved turns</span></label>
+          <p id="whisperxDisabledReason" class="mono-note" hidden></p>
+        </fieldset>
+        <div id="cutPreviewBanner" class="cut-preview-banner" role="status" aria-live="polite" hidden>
+          <strong id="cutPreviewText">Previewing candidate — current cut unchanged.</strong>
+          <div class="cut-preview-actions">
+            <button id="saveCutButton" type="button" class="primary">Save this cut</button>
+            <button id="discardCutButton" type="button" class="ghost">Discard preview</button>
+          </div>
+        </div>
+        <p id="cutReviewStatus" class="mono-note" role="status" aria-live="polite"></p>
+      </section>
+
       <audio id="programAudio" class="program-audio" controls preload="auto"></audio>
 
       <section class="timeline-section" aria-label="Metadata timeline">

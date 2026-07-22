@@ -87,6 +87,43 @@ export function analysisStatusDisplay(analysis = {}, clip = null) {
   return { source, mapping, safety, tone: conditions.unresolved || conditions.low_confidence || conditions.missing_wide || conditions.overlap || conditions.off_camera ? "uncertain" : "confirmed" };
 }
 
+export function formatConfidence(confidence) {
+  return Number.isFinite(confidence) && confidence >= 0 && confidence <= 1
+    ? `${Math.round(confidence * 100)}%`
+    : "Not reported";
+}
+
+export function sourceChoiceDisplay(source) {
+  return source === "whisperx" ? "WhisperX resolved turns" : "VAD baseline";
+}
+
+/** Non-destructive candidate state: only commit() changes the selected cut. */
+export function createCutPreviewState(selectedCut, selectionVersion = 0) {
+  let selected = selectedCut;
+  let preview = null;
+  let version = selectionVersion;
+  return {
+    get selected() { return selected; },
+    get preview() { return preview; },
+    get selectionVersion() { return version; },
+    previewCut(candidate) {
+      if (!candidate || !Array.isArray(candidate.clips)) throw new Error("Cut preview is malformed");
+      preview = candidate;
+      return preview;
+    },
+    discard() { preview = null; return selected; },
+    commit(candidate, nextVersion) {
+      if (!candidate || !Number.isInteger(nextVersion) || nextVersion <= version) {
+        throw new Error("Cut selection is stale; reload before saving");
+      }
+      selected = candidate;
+      preview = null;
+      version = nextVersion;
+      return selected;
+    },
+  };
+}
+
 const ACTIVITY_STATUS_LABELS = {
   confirmed: ["Confirmed authority", "confirmed"],
   unresolved: ["Unresolved", "unresolved"],
@@ -731,6 +768,15 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
     analysisSource: doc.getElementById("analysisSource"),
     analysisMapping: doc.getElementById("analysisMapping"),
     analysisSafety: doc.getElementById("analysisSafety"),
+    currentCutLabel: doc.getElementById("currentCutLabel"),
+    cutConfidence: doc.getElementById("cutConfidence"),
+    cutSourceGroup: doc.getElementById("cutSourceGroup"),
+    whisperxDisabledReason: doc.getElementById("whisperxDisabledReason"),
+    cutPreviewBanner: doc.getElementById("cutPreviewBanner"),
+    cutPreviewText: doc.getElementById("cutPreviewText"),
+    saveCutButton: doc.getElementById("saveCutButton"),
+    discardCutButton: doc.getElementById("discardCutButton"),
+    cutReviewStatus: doc.getElementById("cutReviewStatus"),
     // Timeline
     cdlLane: doc.getElementById("cdlLane"),
     projectedLane: doc.getElementById("projectedLane"),
@@ -940,6 +986,9 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
 
   // Load cut parameters
   loadCutParams(projectId, elements, statePayload, clips, angleById, override, render, frameSeconds, () => {
+    if (timelineState) renderTimeline(elements, timelineState, clips, angleById);
+  });
+  setupCutReview(projectId, elements, statePayload, clips, render, () => {
     if (timelineState) renderTimeline(elements, timelineState, clips, angleById);
   });
 
@@ -1611,6 +1660,126 @@ function renderAngleLutAssignments(elements, data, projectId, statePayload, angl
   }
 }
 
+// ── Cut review / candidate preview ─────────────────────────
+function setupCutReview(projectId, elements, statePayload, clips, render, refreshTimeline) {
+  if (!elements.cutSourceGroup) return;
+  const selected = { ...statePayload.cut, clips: [...clips] };
+  const selectionVersion = Number.isInteger(statePayload.selection_version)
+    ? statePayload.selection_version
+    : Number.isInteger(statePayload.selection?.version) ? statePayload.selection.version : 0;
+  const previewState = createCutPreviewState(selected, selectionVersion);
+  const source = statePayload.analysis?.source || statePayload.cut?.analysis_source || "vad";
+  const sourceInputs = [...elements.cutSourceGroup.querySelectorAll('input[name="analysisSourceChoice"]')];
+  const whisperAvailable = Boolean(
+    statePayload.analysis?.whisperx_available
+    ?? statePayload.analysis?.available_sources?.includes?.("whisperx"),
+  );
+  const confidence = statePayload.analysis?.confidence ?? statePayload.cut?.confidence;
+  const setStatus = (message, tone = "") => {
+    if (elements.cutReviewStatus) {
+      elements.cutReviewStatus.textContent = message;
+      elements.cutReviewStatus.style.color = tone ? `var(--${tone})` : "";
+    }
+  };
+  const setCurrent = (cut) => {
+    if (elements.currentCutLabel) elements.currentCutLabel.textContent = cut?.name || sourceChoiceDisplay(cut?.analysis_source);
+    if (elements.cutConfidence) elements.cutConfidence.textContent = `Confidence: ${formatConfidence(cut?.confidence ?? confidence)}`;
+  };
+  setCurrent(selected);
+  for (const input of sourceInputs) {
+    input.checked = input.value === source;
+    input.addEventListener("change", () => {
+      if (input.checked) setStatus(`Ready to generate ${sourceChoiceDisplay(input.value)} candidate.`);
+    });
+  }
+  const whisperInput = sourceInputs.find((input) => input.value === "whisperx");
+  if (whisperInput && !whisperAvailable) {
+    whisperInput.disabled = true;
+    if (elements.whisperxDisabledReason) {
+      elements.whisperxDisabledReason.hidden = false;
+      elements.whisperxDisabledReason.textContent = "WhisperX is unavailable until its artifact, confirmation, and wide-camera gates pass.";
+    }
+  }
+  const banner = (candidate) => {
+    if (!elements.cutPreviewBanner) return;
+    elements.cutPreviewBanner.hidden = !candidate;
+    if (candidate && elements.cutPreviewText) {
+      elements.cutPreviewText.textContent = `Previewing ${sourceChoiceDisplay(candidate.analysis_source)} candidate — current cut unchanged.`;
+    }
+  };
+  const generateButton = document.getElementById("regenerateCutBtn");
+  if (generateButton) {
+    generateButton.addEventListener("click", async () => {
+      const selectedSource = sourceInputs.find((input) => input.checked)?.value || "vad";
+      generateButton.disabled = true;
+      generateButton.textContent = "Generating…";
+      setStatus("Generating candidate…");
+      try {
+        const params = {
+          overlap_to_wide: document.getElementById("cutOverlapToWide")?.value === "true",
+          min_shot_ms: parseInt(document.getElementById("cutMinShotMs")?.value, 10) || 250,
+          lead_in_ms: parseInt(document.getElementById("cutLeadInMs")?.value, 10) || 0,
+          tail_ms: parseInt(document.getElementById("cutTailMs")?.value, 10) || 0,
+          silence_behaviour: document.getElementById("cutSilenceBehaviour")?.value || "wide",
+        };
+        const response = await fetch(`/projects/${projectId}/cut`, {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ params, analysis_source: selectedSource }),
+        });
+        const candidate = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(candidate.detail || `Generation failed (${response.status})`);
+        validateContiguousClips(candidate.clips || []);
+        previewState.previewCut(candidate);
+        clips.splice(0, clips.length, ...candidate.clips);
+        banner(candidate);
+        refreshTimeline();
+        render(true);
+        setStatus("Preview ready. The persisted current cut is unchanged.", "warn");
+      } catch (error) {
+        setStatus(error.message || "Generation failed", "err");
+      } finally {
+        generateButton.disabled = false;
+        generateButton.textContent = "Regenerate Cut";
+      }
+    });
+  }
+  elements.discardCutButton?.addEventListener("click", () => {
+    const restored = previewState.discard();
+    clips.splice(0, clips.length, ...(restored.clips || []));
+    banner(null);
+    refreshTimeline();
+    render(true);
+    setStatus("Preview discarded. Current cut unchanged.");
+  });
+  elements.saveCutButton?.addEventListener("click", async () => {
+    const candidate = previewState.preview;
+    if (!candidate) return setStatus("There is no preview to save.", "warn");
+    elements.saveCutButton.disabled = true;
+    elements.saveCutButton.textContent = "Saving…";
+    setStatus("Saving cut selection…");
+    try {
+      const response = await fetch(`/projects/${projectId}/cut-selection`, {
+        method: "PUT", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cut_id: candidate.cut_id, expected_version: previewState.selectionVersion }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(response.status === 409 ? "Selection conflict: reload and review the current cut before saving." : (result.detail || `Save failed (${response.status})`));
+      previewState.commit(candidate, result.version ?? result.selection_version ?? candidate.selection_version ?? previewState.selectionVersion + 1);
+      statePayload.cut = candidate;
+      if (elements.currentCutLabel) elements.currentCutLabel.textContent = candidate.name || sourceChoiceDisplay(candidate.analysis_source);
+      banner(null);
+      setStatus("Cut saved. Playback and export now use this selected cut.", "ok");
+    } catch (error) {
+      setStatus(error.message || "Save failed; preview retained.", "err");
+    } finally {
+      elements.saveCutButton.disabled = false;
+      elements.saveCutButton.textContent = "Save this cut";
+    }
+  });
+}
+
 // ── Cut Parameters ────────────────────────────────────────
 
 function loadCutParams(projectId, elements, statePayload, clips, angleById, override, render, frameSeconds, refreshTimeline = null) {
@@ -1683,57 +1852,6 @@ function loadCutParams(projectId, elements, statePayload, clips, angleById, over
     }));
   }
 
-  if (regenBtn) {
-    regenBtn.addEventListener("click", async () => {
-      regenBtn.disabled = true;
-      regenBtn.textContent = "Regenerating…";
-      statusEl.textContent = "";
-      try {
-        const params = {
-          overlap_to_wide: overlapSelect.value === "true",
-          min_shot_ms: parseInt(minShotInput.value, 10) || 250,
-          lead_in_ms: parseInt(leadInInput.value, 10) || 0,
-          tail_ms: parseInt(tailInput.value, 10) || 0,
-          silence_behaviour: silenceSelect.value || "wide",
-          wide_interval_ms: parseInt(wideIntervalInput.value, 10) || 0,
-          overlap_min_ms: overlapMinInput ? (parseInt(overlapMinInput.value, 10) || 0) : 900,
-          interject_max_ms: interjectInput ? (parseInt(interjectInput.value, 10) || 0) : 1200,
-        };
-        const res = await fetch(`/projects/${projectId}/cut`, {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ params }),
-        });
-        if (res.ok) {
-          const newCut = await res.json();
-          // Do not replace the displayed/persisted selection with a malformed
-          // or gapped candidate. The authoritative current cut remains visible
-          // and the failure is explicit in the controls below.
-          validateContiguousClips(newCut.clips);
-          // Replace clips with new ones
-          clips.length = 0;
-          clips.push(...newCut.clips);
-          if (statePayload.cut) statePayload.cut.params = params;
-          if (refreshTimeline) refreshTimeline();
-          render(true);
-          statusEl.textContent = "Cut regenerated";
-          statusEl.style.color = "var(--ok)";
-        } else {
-          const err = await res.json();
-          statusEl.textContent = `Failed: ${err.detail || res.status}`;
-          statusEl.style.color = "var(--err)";
-        }
-      } catch (_err) {
-        statusEl.textContent = "Regeneration failed";
-        statusEl.style.color = "var(--err)";
-      } finally {
-        regenBtn.disabled = false;
-        regenBtn.textContent = "Regenerate Cut";
-      }
-    });
-  }
-
   // ── Export controls ────────────────────────────────────────
   const exportStatusEl = document.getElementById("exportStatus");
 
@@ -1802,6 +1920,9 @@ if (typeof window !== "undefined") {
     normalizeProjectedActivity,
     createPlayerStateStore,
     analysisStatusDisplay,
+    formatConfidence,
+    sourceChoiceDisplay,
+    createCutPreviewState,
     // Timeline helpers
     formatTimelineMs,
     msToPercent,
