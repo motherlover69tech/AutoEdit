@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('/opt/data/workspace/AUTOEDIT/.hermes/watchdog-browser/node_modules/playwright');
 
-const ROOT = '/opt/data/workspace/AUTOEDIT/src/autoedit/web';
+const ROOT = path.resolve(__dirname, '../../src/autoedit/web');
 const PROJECT = '01J00000000000000000000000';
 const notes = [
   { id: 'n1', t_ms: 1000, body: '<script>window.__xss = true</script>', kind: 'note', author: 'Reviewer Alpha' },
@@ -81,7 +81,9 @@ function makeServer() {
     await page.waitForFunction(() => document.querySelectorAll('.note-item').length === 1);
     await page.screenshot({ path: '/opt/data/workspace/AUTOEDIT/tests/browser/stage_7_4_delete-failure.png', fullPage: true });
     assert.equal(await page.locator('.note-item').count(), 1, 'deleted note leaves list');
+    assert.equal(await page.locator('.note-item').filter({ hasText: 'Reviewer Alpha' }).count(), 0, 'deleted note title leaves list');
     assert.equal(await page.locator('.note-marker').count(), 1, 'deleted note leaves timeline lane');
+    assert.equal(await page.locator('.note-marker').filter({ hasAttribute: 'data-t-ms', value: '1000' }).count(), 0, 'deleted note marker leaves timeline lane');
     assert.deepEqual(consoleErrors, [], `browser console errors: ${consoleErrors.join('; ')}`);
     console.log('STAGE_7_4_XSS_GATE_PASS');
   } finally {
