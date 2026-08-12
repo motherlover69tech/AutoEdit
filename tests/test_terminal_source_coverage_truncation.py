@@ -53,18 +53,23 @@ def test_terminal_confirmed_camera_and_wide_exhaustion_truncates_on_frame_bounda
             {"start_ms": 668083, "end_ms": 671292, "active": ["speaker-a"]},
         ],
     )
-    monkeypatch.setattr(
-        api_module,
-        "generate_cdl",
-        lambda *args, **kwargs: {
+    generated_cdl: dict = {}
+
+    def mock_generate_cdl(*args, **kwargs):
+        generated_cdl["value"] = {
             "version": 1,
             "clips": [
                 {"angle_id": by_role["cam_left"], "timeline_in_ms": 0, "src_in_ms": 0, "dur_ms": 652708},
                 {"angle_id": by_role["wide"], "timeline_in_ms": 652708, "src_in_ms": 652708, "dur_ms": 13459},
+                {"angle_id": by_role["cam_right"], "timeline_in_ms": 667208, "src_in_ms": 667208, "dur_ms": 875},
                 {"angle_id": by_role["cam_left"], "timeline_in_ms": 668083, "src_in_ms": 668083, "dur_ms": 3213},
             ],
-        },
-    )
+        }
+        generated_cdl["original"] = json.loads(json.dumps(generated_cdl["value"]))
+
+        return generated_cdl["value"]
+
+    monkeypatch.setattr(api_module, "generate_cdl", mock_generate_cdl)
 
     evidence_paths = [
         project_dir / "audio" / "ai" / "v1" / "result.json",
@@ -88,7 +93,12 @@ def test_terminal_confirmed_camera_and_wide_exhaustion_truncates_on_frame_bounda
     }
     candidate_path = project_dir / "edit" / "cdl_whisperx_run-one.json"
     assert json.loads(candidate_path.read_text())["truncation"] == result["truncation"]
-    assert all(clip["angle_id"] != by_role["cam_right"] for clip in result["clips"])
+    generated_interviewee_clips = [
+        clip for clip in generated_cdl["original"]["clips"] if clip["angle_id"] == by_role["cam_right"]
+    ]
+    assert generated_interviewee_clips == [
+        {"angle_id": by_role["cam_right"], "timeline_in_ms": 667208, "src_in_ms": 667208, "dur_ms": 875}
+    ]
     with Session(engine) as session:
         ai_row = session.execute(
             cuts.select().where(cuts.c.project_id == project_id, cuts.c.kind == "ai")
@@ -107,6 +117,7 @@ def test_terminal_confirmed_camera_and_wide_exhaustion_truncates_on_frame_bounda
     assert all(
         clip["timeline_in_ms"] + clip["dur_ms"] <= 666167 for clip in result["clips"]
     )
+    assert all(clip["timeline_in_ms"] < 666167 for clip in result["clips"])
     published = json.loads(
         (project_dir / "audio" / "ai" / "v1" / "activity-whisperx.json").read_text()
     )
@@ -144,19 +155,31 @@ def _terminal_fixture(tmp_path: Path, monkeypatch, *, wide_end=666185, fps=(24, 
 
 def test_internal_gap_is_fail_closed_without_publication(tmp_path: Path, monkeypatch):
     engine, client, pid, root, _roles = _terminal_fixture(tmp_path, monkeypatch)
+    with engine.begin() as connection:
+        connection.execute(
+            update(angles).where(angles.c.id == _roles["cam_right"]).values(duration_ms=664000)
+        )
     monkeypatch.setattr(api_module, "generate_cdl", lambda *a, **k: {
         "version": 1, "clips": [
             {"angle_id": _roles["cam_left"], "timeline_in_ms": 0, "src_in_ms": 0, "dur_ms": 652708},
-            {"angle_id": _roles["wide"], "timeline_in_ms": 652708, "src_in_ms": 652708, "dur_ms": 1000},
-            {"angle_id": _roles["cam_right"], "timeline_in_ms": 653708, "src_in_ms": 653708, "dur_ms": 17588},
+            {"angle_id": _roles["wide"], "timeline_in_ms": 652708, "src_in_ms": 652708, "dur_ms": 3292},
+            {"angle_id": _roles["cam_right"], "timeline_in_ms": 656000, "src_in_ms": 665000, "dur_ms": 1000},
+            {"angle_id": _roles["wide"], "timeline_in_ms": 657000, "src_in_ms": 657000, "dur_ms": 9185},
         ]})
-    before = (root / "edit" / "cdl.json").read_bytes()
+    before = {path: path.read_bytes() for path in (
+        root / "edit" / "cdl.json",
+        root / "audio" / "activity.json",
+    )}
     response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
     assert response.status_code == 422
-    assert (root / "edit" / "cdl.json").read_bytes() == before
+    assert "terminal source coverage is ineligible" in response.json()["detail"]
+    for path, original in before.items():
+        assert path.read_bytes() == original
     assert not list((root / "edit").glob("cdl_whisperx_*.json"))
+    assert not list((root / "audio" / "ai" / "v1").glob("activity-whisperx*"))
     with Session(engine) as session:
         assert not session.execute(cuts.select().where(cuts.c.project_id == pid, cuts.c.kind == "ai")).all()
+        assert not session.execute(project_cut_selections.select().where(project_cut_selections.c.project_id == pid)).all()
 
 
 def test_exhausted_wide_with_unsafe_terminal_state_is_fail_closed(tmp_path: Path, monkeypatch):
