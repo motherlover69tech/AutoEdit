@@ -3,16 +3,18 @@
 Status: DESIGN_APPROVED
 Author: autoeditdesigner
 Date: 2026-08-12
-Implementation base inspected: `0601b43cc470212a0ff6eff725dd60247a68e602`
-Provider preflight: the active profile declares private `custom:9Router`, with `cx/gpt-5.6-sol` in its configured fallback chain. This card and its live session explicitly authorize that exact private route. A minimal live completion on `custom:9Router` / `cx/gpt-5.6-sol` returned `ROUTE_OK`. Public OpenRouter was not used.
+Implementation base inspected: `0de62046bc53503a76789b0b617a8442b8677801`
+Provider preflight: the active profile declares private `custom:9Router`, with `cx/gpt-5.6-sol` in its configured fallback chain. This card and its live session explicitly authorize that exact private route. A fresh minimal live completion completed successfully; its usage record reports model `cx/gpt-5.6-sol`, provider `custom`, and no failure. Public OpenRouter was not used.
+
+Amendment authority: Peter, 2026-08-12. This amendment supersedes only BACKEND-P6TSC-004 conditions 2 and 4, the related classification/boundary language, and the exact regression topology. BACKEND-P6TSC-001..003 and 005..012 plus all SEC, TEST, and OPS requirements otherwise remain controlling, with only consistency edits needed to express the amended boundary.
 
 ## 1. Purpose and owner decision
 
 Correct only the WhisperX candidate-generation source-coverage seam in `POST /projects/{project_id}/cut`.
 
-Peter's decision is authoritative for this project class: if final presenter speech continues after both its current confirmed presenter camera and the configured wide camera have ended, the non-destructive AI candidate ends at the greatest canonical frame boundary fully covered by either of those authorized cameras. The interviewee camera is never substituted for presenter speech. The accepted AI result artifact, Gate 1 evidence, program-audio master, confirmations, and source timing evidence remain unchanged. The selected cut remains unchanged until the existing explicit “Save this cut” action succeeds.
+Peter's amended decision is authoritative for this project class: “End the AI cut at the last frame where an authorized presenter/wide camera exists.” Define the boundary from the latest program-timeline coverage end among the exact current-confirmed camera or cameras authorized for the terminal presenter state and the configured wide camera, then end the non-destructive AI candidate at the greatest canonical frame boundary not later than that instant. A camera confirmed for another speaker is not in this boundary set merely because its recording continues. All material at or after that boundary is omitted, including later material that would be covered by another confirmed speaker camera. The interviewee camera is never substituted for presenter speech. The accepted AI result artifact, Gate 1 evidence, program-audio master, confirmations, and source timing evidence remain unchanged. The selected cut remains unchanged until the existing explicit “Save this cut” action succeeds.
 
-This is a narrow terminal-tail exception, not a general “make the cut validate” clamp. Internal coverage failures, non-tail failures, unsafe-wide states, and arbitrary camera substitution continue to fail closed.
+This is a boundary-based terminal truncation policy, not a general “make the cut validate” clamp. Any source-uncovered instant strictly before the boundary, unsafe-wide state in the retained prefix, or arbitrary camera substitution continues to fail closed. Covered material after the boundary does not make truncation ineligible; it is deliberately omitted by Peter's decision.
 
 ## 2. Sources inspected
 
@@ -40,14 +42,15 @@ No production files, private media, secrets, containers, or database rows were r
 - The accepted artifact ends at `671296 ms` at `24/1 fps`.
 - Synchronized program-timeline coverage ends at presenter `652720 ms`, wide `666185 ms`, and interviewee `671296 ms`.
 - Confirmed presenter speech continues to `671292 ms`, after both the presenter and wide sources have ended.
+- The live topology after wide exhaustion is silence `666185–667208 ms`, a covered interviewee segment `667208–668083 ms`, and presenter speech `668083–671292 ms`. Peter explicitly chose to omit all three spans rather than let the covered interviewee segment defeat truncation.
 - Source/proxy durations agree with the database, so the failure is not stale duration metadata.
-- The current API repairs an exhausted AI close camera only with the wide camera. It does not use another speaker camera, then requires the repaired AI CDL to cover the complete artifact end. The request therefore returns `422`; no AI row/file is published and selection remains unchanged.
+- Deployed candidate `0de6204` repairs an exhausted AI close camera only with the wide camera and uses a strict single-terminal-suffix classifier. It does not use another speaker camera. The covered interviewee segment splits the uncovered spans, so the live topology returns `422`; no AI row/file is published and selection remains unchanged.
 - Current publication treats the WhisperX activity file, immutable candidate CDL, and AI cut row as one atomic unit. The compatibility `edit/cdl.json` mirror and selected cut are not changed by successful AI candidate generation.
 - Program audio is the player master clock, source media is not played in the browser, and the production Whisper/diarization backends remain mock.
 
 ### 3.2 Canonical exact result for the reported case
 
-The greatest `24/1` canonical frame boundary not later than the last authorized coverage instant `666185 ms` is frame `15988`, represented as `666167 ms`. Frame `15989` is `666208 ms` and is outside coverage. Therefore:
+For the live case, the authorized boundary set contains the exact current-confirmed presenter camera ending at `652720 ms` and the configured wide camera ending at `666185 ms`; the later interviewee-camera end is not an authorized presenter boundary. Thus `boundary_instant = max(652720, 666185) = 666185 ms`. The greatest `24/1` canonical frame boundary not later than that instant is frame `15988`, represented as `666167 ms`. Frame `15989` is `666208 ms` and is outside coverage. Therefore:
 
 - `original_artifact_end_ms = 671296`
 - `candidate_end_ms = 666167`
@@ -58,7 +61,7 @@ These are acceptance values, not illustrative approximations.
 ### 3.3 Assumptions
 
 - Angle durations and rebased sync offsets already use the authoritative convention in the current cut path. Eligibility must use those source-bound calculations rather than raw duration alone.
-- An angle file's available interval is continuous. Any delayed start caused by rebased sync still participates in the existing leading-source checks and cannot be hidden by this terminal exception.
+- An angle file's available interval is continuous. Any delayed start caused by rebased sync still participates in the existing leading-source checks and cannot be hidden when it falls strictly before the candidate boundary.
 - The current confirmation row for the exact artifact version remains the sole authority for speaker-to-camera identity.
 - The existing candidate activity projection is useful timing evidence and may remain full-artifact length; candidate shortening is represented by explicit metadata and the CDL clip end, not by deleting accepted speech evidence.
 
@@ -70,7 +73,7 @@ These are acceptance values, not illustrative approximations.
 
 ### 3.5 User decisions already supplied
 
-- Truncate only the terminal source-uncovered tail under the policy above.
+- End the AI cut at the last canonical frame where an authorized presenter/wide camera exists; for the live case, truncate at `666167 ms` and drop the final silence, interviewee interjection, and presenter closing.
 - Never use the interviewee camera for presenter speech.
 - Preserve accepted evidence and selection authority.
 - Scope implementation to `src/autoedit/api.py`, focused API tests, and this approved plan.
@@ -87,17 +90,17 @@ These are acceptance values, not illustrative approximations.
 
 - **BACKEND-P6TSC-003 — Source-bound coverage basis.** Determine source availability in the existing program-timeline basis, using current rebased sync offsets and canonical source conversion. A span is covered only when its generated clip has non-negative `src_in_ms` and `src_in_ms + dur_ms` is no later than that angle's probed `duration_ms`. Missing/invalid duration, invalid offset conversion, or a source-bound calculation error does not authorize truncation.
 
-- **BACKEND-P6TSC-004 — Eligible terminal suffix.** Truncation is eligible only when all of the following are true:
+- **BACKEND-P6TSC-004 — Eligible boundary truncation.** Truncation is eligible only when all of the following are true:
   1. ordinary AI source repair cannot cover the complete accepted artifact timeline;
-  2. the first unrepairable source instant begins one continuous terminal suffix ending at `original_artifact_end_ms`;
-  3. no source-uncovered instant exists before that suffix;
-  4. no later generated span after the first unrepairable instant is fully coverable by its authorized current-confirmed camera or the wide camera;
-  5. the suffix contains at least one current-confirmed solo active-speech segment for which both its exact confirmed camera and the wide are unavailable; and
+  2. `boundary_instant` is the maximum program-timeline coverage end over the exact current-confirmed camera or cameras authorized for the terminal presenter state and the configured wide camera, using the source-bound basis in BACKEND-P6TSC-003; a camera confirmed for another speaker does not enter this set merely because it continues later;
+  3. no source-uncovered instant exists strictly before `candidate_end_ms`, where `candidate_end_ms` is the greatest canonical frame boundary not later than `boundary_instant`;
+  4. `candidate_end_ms` is positive; material at or after it is dropped even when a later span is fully coverable by its own current-confirmed camera;
+  5. the omitted material contains at least one current-confirmed solo active-speech segment for which both its exact confirmed camera and the wide are unavailable; and
   6. the candidate has a positive, contiguous, source-bound prefix beginning at `0`.
 
-  Silence may occur inside the same eligible suffix because silence still requires the wide; it is not sufficient by itself to authorize truncation. Unresolved, low-confidence, overlap, or off-camera/safe-wide source failure is not this exception and remains fail closed.
+  Silence and covered segments may occur in the omitted material because everything at or after the boundary is deliberately dropped; silence alone is not sufficient to authorize truncation. Unresolved, low-confidence, overlap, or off-camera/safe-wide source failure strictly before the boundary is not this exception and remains fail closed.
 
-- **BACKEND-P6TSC-005 — Canonical candidate end.** Let `coverage_exhaustion_ms` be the earliest instant of the eligible unrepairable terminal suffix. Set `candidate_end_ms` to the greatest canonical project-frame boundary not later than that instant for which the entire prefix remains source-bound. The frame-rounding sliver between `candidate_end_ms` and `coverage_exhaustion_ms`, if any, is part of the omitted tail. For the reported `24/1` case the exact end is `666167 ms`.
+- **BACKEND-P6TSC-005 — Canonical candidate end.** Let `boundary_instant` be the BACKEND-P6TSC-004 maximum authorized coverage end. Set `candidate_end_ms` to the greatest canonical project-frame boundary not later than that instant for which the entire prefix remains source-bound. The frame-rounding sliver between `candidate_end_ms` and `boundary_instant`, if any, is part of the omitted tail. For the reported `24/1` case, `max(652720, 666185) = 666185 ms`, so the exact end is `666167 ms`.
 
 - **BACKEND-P6TSC-006 — Candidate clip invariants.** The shortened CDL must be non-empty, start at `0`, remain sorted and contiguous with no gaps/overlaps, end exactly at `candidate_end_ms`, and retain exact canonical frame boundaries and source bounds for every clip. Shorten the final surviving clip if necessary and remove every clip at or after the candidate end. No later clip may survive, even if an arbitrary unauthorized camera has media there. Run the existing CDL validator before publication.
 
@@ -115,7 +118,7 @@ These are acceptance values, not illustrative approximations.
 
 - **BACKEND-P6TSC-009 — Selection and publication immutability.** Publish the shortened activity metadata, immutable candidate CDL, and AI cut row through the existing atomic unit. Do not overwrite the selected-cut mirror or alter `project_cut_selections`. Selection changes only through the existing explicit save endpoint and optimistic version check. Any validation, write, replace, database, or commit failure rolls back all candidate publication sides and preserves prior bytes/rows/selection.
 
-- **BACKEND-P6TSC-010 — Fail-closed non-tail behavior.** A missing interval before the final suffix, a later recoverable/covered clip after a missing interval, a delayed source that creates an internal hole, no positive source-bound prefix, no authorized source, malformed duration/offset data, or a suffix that does not satisfy BACKEND-P6TSC-004 returns `422` through the non-publication path. It must not be converted into a shorter candidate.
+- **BACKEND-P6TSC-010 — Fail-closed retained-prefix behavior.** Any source-uncovered instant strictly before `candidate_end_ms`, a delayed source that creates an internal hole in the retained prefix, no positive source-bound prefix, no authorized source, malformed duration/offset data, or a candidate that does not satisfy BACKEND-P6TSC-004 returns `422` through the non-publication path. It must not be converted into a shorter candidate. A later recoverable/covered clip at or after the boundary does not prevent truncation and is omitted with all other post-boundary material.
 
 - **BACKEND-P6TSC-011 — Existing authority and safety.** Preserve current artifact/version and Gate 1 validation, full current-confirmation coverage/bijection, current-confirmation identity precedence, confidence thresholding, overlap/unresolved/off-camera safe-wide behavior, shot reasons, source conversion, immutable candidate naming, atomicity, and selected-cut behavior. Truncation cannot make an unauthorized identity or camera authoritative.
 
@@ -125,7 +128,7 @@ These are acceptance values, not illustrative approximations.
 
 - **SEC-P6TSC-001 — No identity or camera inference.** Camera authorization comes only from the current exact-version confirmed row and configured wide role. Do not infer from transcript text, speaker names, diarizer ordering, channel source, angle labels, filenames, prior mappings, suggestions, or another camera's remaining duration.
 
-- **SEC-P6TSC-002 — Fail closed rather than conceal loss.** Truncation must never conceal an internal source failure, stale/missing timing metadata, non-bijective confirmation, malformed artifact, unsafe-wide failure, or later valid program material. An ineligible failure publishes no candidate activity/CDL/row and leaves selection unchanged.
+- **SEC-P6TSC-002 — Fail closed rather than conceal retained-prefix loss.** Truncation must never conceal an internal source failure or unsafe-wide failure strictly before `candidate_end_ms`, stale/missing timing metadata, non-bijective confirmation, or a malformed artifact. Later valid program material at or after Peter's approved boundary is deliberately omitted from the candidate but remains preserved in immutable evidence. An ineligible failure publishes no candidate activity/CDL/row and leaves selection unchanged.
 
 - **SEC-P6TSC-003 — Minimized metadata and logs.** The new metadata contains only booleans, bounded integer times, and the fixed reason code. Do not include transcript text, speaker/display names, source paths, filenames, hashes, media payloads, confirmation payloads, or private identifiers in new logs/errors. Existing `candidate_requested`, `candidate_failed`, and `candidate_generated` events remain; the candidate can be audited by `cut_id` and its persisted bounded metadata.
 
@@ -133,19 +136,19 @@ These are acceptance values, not illustrative approximations.
 
 ### 4.3 Tests and acceptance evidence
 
-- **TEST-P6TSC-001 — Regression first, exact reported case.** Before changing behavior, add a failing authenticated/API-level synthetic regression at `24/1 fps` with accepted artifact end `671296`, confirmed presenter coverage `652720`, wide coverage `666185`, interviewee coverage `671296`, and final confirmed presenter speech through `671292`. After correction, `POST /cut` succeeds with an AI candidate ending exactly at `666167` and omitted duration `5129`.
+- **TEST-P6TSC-001 — Regression first, exact reported topology.** Before changing behavior, add a failing authenticated/API-level synthetic regression at `24/1 fps` with accepted artifact end `671296`, confirmed presenter coverage ending `652720`, wide coverage ending `666185`, silence `666185–667208`, covered interviewee speech `667208–668083`, and presenter speech `668083–671292`. After correction, `POST /cut` succeeds with an AI candidate ending exactly at `666167`, omitted duration `5129`, exact truncation metadata, no clip beyond `666167`, and no interviewee substitution for presenter speech.
 
-- **TEST-P6TSC-002 — Metadata and no substitution.** Assert the API response, persisted AI row CDL, immutable candidate file, and published activity file contain the exact `truncation` object. Assert the last CDL end equals `candidate_end_ms`; no clip begins or ends later; no omitted-tail clip uses the interviewee camera; and the interviewee angle ID never appears as a fallback for presenter speech.
+- **TEST-P6TSC-002 — Metadata, total omission, and no substitution.** Assert the API response, persisted AI row CDL, immutable candidate file, and published activity file contain the exact `truncation` object. Assert the last CDL end equals `candidate_end_ms`; no clip begins or ends later; the covered interviewee segment `667208–668083` does not survive; and the interviewee angle ID never appears as a fallback for presenter speech.
 
 - **TEST-P6TSC-003 — Evidence and selection snapshots.** Seed an accepted artifact, Gate 1 record, program audio, source/analysis timing artifacts, current confirmation rows, selected-cut row, and selected `edit/cdl.json`. Snapshot bytes/row payloads before candidate generation. Assert they are unchanged afterward, while exactly one separate AI candidate publication succeeds and remains unselected.
 
-- **TEST-P6TSC-004 — Internal gap control.** Create a source-uncovered presenter interval followed by later source-coverable confirmed interviewee material. Assert `422`, no truncation, no activity/CDL/AI-row publication, and unchanged selected cut. Repeat with a delayed-start/internal source hole if the fixture can express it without unrelated setup.
+- **TEST-P6TSC-004 — Retained-prefix internal gap control.** Create a source-uncovered interval strictly before the computed boundary—for example, a presenter dropout mid-timeline while wide coverage still extends to the later boundary. Assert `422`, no truncation, no activity/CDL/AI-row publication, and unchanged selected cut. Repeat with a delayed-start/internal source hole if the fixture can express it without unrelated setup. A covered interviewee segment after the boundary belongs in TEST-P6TSC-001 and must not produce `422`.
 
 - **TEST-P6TSC-005 — No authorized camera/non-empty control.** Make both the required confirmed camera and wide unavailable before the first complete candidate frame, while an unauthorized interviewee source remains. Assert `422`, no empty candidate, no interviewee substitution, no publication, and unchanged selection.
 
 - **TEST-P6TSC-006 — Valid-wide full-length control.** Keep the confirmed presenter camera short but extend the wide source through the artifact end. Assert a full-length valid candidate, `truncation.applied=false`, equal original/candidate ends, omitted `0`, null reason, and normal wide fallback.
 
-- **TEST-P6TSC-007 — Unsafe-wide states remain fail closed.** Cover at least overlap and low-confidence/unresolved terminal speech with exhausted wide coverage. Assert this exception does not silently truncate those states and does not choose an arbitrary close camera. Existing safe-wide behavior remains authoritative.
+- **TEST-P6TSC-007 — Unsafe-wide states remain fail closed in the retained prefix.** Cover at least overlap and low-confidence/unresolved states strictly before `candidate_end_ms` with unavailable wide coverage. Assert this exception does not hide those states and does not choose an arbitrary close camera. Existing safe-wide behavior remains authoritative in the retained prefix.
 
 - **TEST-P6TSC-008 — Frame rounding and source bounds.** At `24/1`, prove frame `15988 = 666167 ms` is accepted and frame `15989 = 666208 ms` exceeds `666185 ms`. Add one non-integer-rate or non-zero-sync case using shared canonical helpers. Assert every surviving clip is frame-aligned, source-bound, contiguous from `0`, and the final source end is no later than probed duration.
 
@@ -177,28 +180,29 @@ These are acceptance values, not illustrative approximations.
 
 1. Run the existing project/artifact/Gate 1/current-confirmation validation and project confirmed turns exactly as today.
 2. Generate the normal AI activity and CDL using current confidence/overlap/safe-wide rules.
-3. Apply current source repair, tracking every source-uncovered interval instead of merely dropping an unrepaired span.
+3. Apply current source repair and calculate the exact current-confirmed camera coverage end or ends authorized for the terminal presenter state plus the wide coverage end in the existing program-timeline/source-bound basis. Do not add an otherwise longer other-speaker camera to the boundary set.
 4. If the result covers the accepted artifact end, publish a normal full candidate with `truncation.applied=false`.
-5. If it does not, classify the complete set of uncovered intervals. Reject unless they form one terminal suffix and satisfy BACKEND-P6TSC-004. Classification examines current projected activity and exact authorized camera availability; it never searches other cameras for usable footage.
-6. Compute the last safe prefix boundary with the shared canonical frame helpers and existing sync/source-bound checks. Reject if the result is `0`, non-contiguous, off-grid, or not source-bound.
+5. If it does not, set `boundary_instant` to the maximum of those authorized coverage ends and floor it to `candidate_end_ms` with the shared canonical frame helpers. Reject unless `candidate_end_ms > 0` and every instant strictly before it is source-covered under the existing authorization rules. Do not reject merely because a covered segment exists at or after the boundary.
+6. Validate the retained prefix with existing sync/source-bound checks. Reject if it is non-contiguous, off-grid, not source-bound, or contains an unsafe-wide failure.
 7. End the final surviving clip exactly at that boundary and remove every later clip. Validate the complete shortened CDL.
 8. Attach the same deterministic `truncation` object to the full evidence-preserving projected activity metadata and shortened CDL.
 9. Atomically publish the activity metadata, immutable CDL, and AI row through the existing transaction. Leave the selected cut and compatibility mirror untouched.
 
-The exception belongs immediately around the current complete-source-bound assertion and source-repair result in `generate_cut`; it must not be implemented as a generic validator relaxation or post-publication file edit.
+The exception belongs immediately around the current complete-source-bound assertion and source-repair result in `generate_cut`; it must not be implemented as a generic validator relaxation, a first-gap/single-suffix heuristic, or a post-publication file edit.
 
 ## 6. Failure-state matrix
 
 | Condition | Required result |
 |---|---|
-| Exact reported presenter/wide terminal exhaustion | Shorter valid candidate ending `666167 ms`; fixed truncation metadata; unselected |
+| Exact reported presenter/wide exhaustion with later covered interviewee segment | Shorter valid candidate ending `666167 ms`; drop silence + interviewee interjection + presenter closing; fixed truncation metadata; unselected |
 | Confirmed camera exhausted, wide valid to artifact end | Full candidate; no truncation |
-| Interviewee source extends beyond presenter/wide during presenter speech | Ignore interviewee for that speech; eligible terminal truncation if every other condition passes |
-| Internal presenter/wide gap, then valid later interviewee segment | `422`; no publication |
-| Delayed start or missing coverage before terminal suffix | `422`; no publication |
+| Interviewee source extends beyond presenter/wide | Do not extend the presenter boundary and do not substitute; drop all material at/after the boundary |
+| Covered interviewee segment after the `666185` boundary, then presenter closing | Omit both segments; candidate still ends `666167 ms` |
+| Presenter/wide source gap strictly before a later authorized coverage boundary | `422`; no publication |
+| Delayed start or missing coverage strictly before candidate boundary | `422`; no publication |
 | No positive authorized-camera prefix | `422`; no empty candidate |
 | Tail contains only silence | `422`; silence alone cannot authorize this policy |
-| Tail source failure is overlap/unresolved/low-confidence/off-camera | Existing safe-wide requirement; `422` when wide unavailable |
+| Retained-prefix source failure is overlap/unresolved/low-confidence/off-camera | Existing safe-wide requirement; `422` when wide unavailable |
 | Invalid/missing duration or offset | `422`; no inferred coverage |
 | Candidate write/replace/DB/commit failure | Atomic rollback; selected cut/evidence unchanged |
 | Explicit later Save this cut succeeds | Existing versioned selection path may select the already validated candidate; outside this correction |
@@ -209,13 +213,13 @@ The request route and payload are unchanged. The successful WhisperX response is
 
 No UI files or behavior change. Existing player/mobile/responsive/accessibility states are unchanged, so no screenshot or visual acceptance is required for implementation. The shorter candidate naturally reports its end through its final CDL clip when previewed later; program audio itself remains full length. A future display treatment would need a separate design card.
 
-Tests use synthetic JSON, tiny generated byte fixtures, and SQLite only. They must not include Peter's media, transcript text, names, project IDs, hashes, or derived production artifacts. Central MySQL and Unraid are not required for Programmer tests.
+Tests use synthetic JSON, tiny generated byte fixtures, and SQLite only. The exact synthetic topology is presenter coverage end `652720`, wide coverage end `666185`, silence `666185–667208`, covered interviewee `667208–668083`, presenter speech `668083–671292`, and artifact end `671296`. They must not include Peter's media, transcript text, names, project IDs, hashes, or derived production artifacts. Central MySQL and Unraid are not required for Programmer tests.
 
 ## 8. File ownership and task sizing
 
 One bounded Programmer worktree:
 
-- `src/autoedit/api.py` — terminal-suffix classification, canonical boundary, metadata, and existing atomic publication integration.
+- `src/autoedit/api.py` — authorized-coverage boundary calculation, retained-prefix validation, metadata, and existing atomic publication integration.
 - `tests/test_terminal_source_coverage_truncation.py` — exact regression and controls; minimal reuse/import from existing helpers is permitted without refactoring those helpers into product modules.
 
 No concurrent task should edit the `generate_cut` source-repair/publication block. The approved implementation does not own UI, database schema/migrations, Compose/env, deployment scripts, docs beyond this plan, private media, or production state.
@@ -237,8 +241,9 @@ No concurrent task should edit the `generate_cut` source-repair/publication bloc
 
 ## 10. Risks and mitigations
 
-- Risk: a generic tail clamp hides an internal missing source. Mitigation: classify all uncovered intervals and require exactly one terminal suffix with no later authorized coverage.
+- Risk: a generic boundary clamp hides an internal missing source. Mitigation: prove every instant strictly before the canonical boundary is source-covered; later coverage does not excuse a retained-prefix gap.
 - Risk: the longer interviewee source is treated as convenient presenter coverage. Mitigation: exact confirmed-camera-plus-wide allowlist and explicit negative assertions.
+- Risk: a later covered interviewee interjection accidentally keeps the candidate open. Mitigation: presenter/wide boundary calculation excludes other-speaker cameras, and every clip at or after the boundary is removed.
 - Risk: flooring to raw milliseconds produces an off-grid or one-frame-over source end. Mitigation: shared canonical frame helpers, floor-before-source-end loop, and exact `666167`/`666208` regression.
 - Risk: trimming activity erases evidence for the omitted speech. Mitigation: retain the full projected activity timeline and accepted artifact end; add candidate boundary metadata instead.
 - Risk: a shortened candidate silently becomes authoritative. Mitigation: existing immutable AI publication and selected-row/mirror snapshots; selection only through explicit versioned save.
@@ -248,7 +253,7 @@ No concurrent task should edit the `generate_cut` source-repair/publication bloc
 ## 11. Non-goals
 
 - No interviewee or arbitrary-camera fallback for presenter speech.
-- No general internal-gap repair, source-duration guessing, stale-metadata repair, or validator relaxation.
+- No general internal-gap repair, source-duration guessing, stale-metadata repair, first-gap/single-suffix classification, or validator relaxation.
 - No changes to automatic energy-envelope cross-correlation or manual sync workflow.
 - No accepted artifact, Gate 1, audio, confirmation, timing, database-schema, or selected-cut mutation.
 - No UI, responsive, accessibility, player, export, Compose, environment, Docker template, deployment-script, reverse-proxy, MySQL, VAAPI, or Unraid change.

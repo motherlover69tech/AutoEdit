@@ -3255,18 +3255,28 @@ def create_app(
                     else:
                         merged.append((start, end, [source_clip]))
                 terminal_start = merged[0][0] if merged else None
-                eligible = bool(merged and merged[-1][1] == expected_end and len(merged) == 1)
+                coverage_ends: list[int] = []
+                if terminal_start is not None:
+                    authorized_ids = {
+                        str(item.get("angle_id"))
+                        for item in repaired_clips
+                        if int(item.get("timeline_in_ms", 0)) < terminal_start
+                    }
+                    if wide_angle_id:
+                        authorized_ids.add(wide_angle_id)
+                    coverage_ends = [
+                        int(angle_duration_ms[angle_id]) + int(sync_offsets.get(angle_id, 0))
+                        for angle_id in authorized_ids
+                        if angle_duration_ms.get(angle_id)
+                    ]
+                boundary_instant = max(coverage_ends, default=0)
+                eligible = bool(merged and boundary_instant > 0)
                 if eligible:
                     # Every uncovered item in the terminal suffix must be a
                     # confirmed, single-speaker segment.  A safe-looking
                     # confirmed segment must not authorize a suffix that also
                     # contains unresolved, low-confidence, overlap, or
                     # off-camera coverage loss.
-                    suffix_items = [
-                        item for item in timeline
-                        if item.get("start_ms", 0) < expected_end
-                        and item.get("end_ms", 0) > merged[0][0]
-                    ]
                     unsafe_reasons = {
                         "unresolved",
                         "low_confidence",
@@ -3275,7 +3285,8 @@ def create_app(
                     }
                     if any(
                         item.get(flag) or str(item.get("reason", "")).split(":", 1)[0] in unsafe_reasons
-                        for item in suffix_items
+                        for item in timeline
+                        if item.get("start_ms", 0) < _floor_frame_ms(boundary_instant)
                         for flag in ("unresolved", "low_confidence", "overlap", "off_camera")
                     ):
                         eligible = False
@@ -3293,10 +3304,12 @@ def create_app(
                             for item in timeline
                         )
                 if eligible and terminal_start is not None:
-                    candidate_end = _floor_frame_ms(terminal_start)
+                    candidate_end = _floor_frame_ms(boundary_instant)
                     if candidate_end <= 0:
                         eligible = False
                     else:
+                        eligible = not any(start < candidate_end for start, _end, _items in merged)
+                    if eligible:
                         trimmed: list[dict] = []
                         for clip in repaired_clips:
                             clip_start = int(clip["timeline_in_ms"])
