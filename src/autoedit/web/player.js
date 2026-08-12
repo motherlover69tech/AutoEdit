@@ -115,6 +115,35 @@ export function sourceChoiceDisplay(source) {
   return source === "whisperx" ? "WhisperX resolved turns" : "VAD baseline";
 }
 
+/**
+ * Render an API error detail into a readable string. FastAPI validation
+ * errors carry detail as a structured array/object; `String(array)` yields
+ * "[object Object]", so flatten it for status display.
+ * @param {unknown} detail
+ * @param {string} fallback
+ * @returns {string}
+ */
+export function apiErrorMessage(detail, fallback) {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return String(item);
+        const loc = Array.isArray(item.loc) ? item.loc.join(".") : "";
+        const msg = typeof item.msg === "string" ? item.msg : "";
+        return [loc, msg].filter(Boolean).join(": ");
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("; ");
+  }
+  if (detail && typeof detail === "object") {
+    const msg = detail.msg || detail.detail || detail.error;
+    if (typeof msg === "string" && msg.trim()) return msg;
+    try { return JSON.stringify(detail); } catch { /* fall through */ }
+  }
+  return fallback;
+}
+
 /** Non-destructive candidate state: only commit() changes the selected cut. */
 export function createCutPreviewState(selectedCut, selectionVersion = 0) {
   let selected = selectedCut;
@@ -1701,9 +1730,13 @@ function renderAngleLutAssignments(elements, data, projectId, statePayload, angl
 function setupCutReview(projectId, elements, statePayload, clips, render, refreshTimeline) {
   if (!elements.cutSourceGroup) return;
   const selected = { ...statePayload.cut, clips: [...clips] };
-  const selectionVersion = Number.isInteger(statePayload.selection_version)
-    ? statePayload.selection_version
-    : Number.isInteger(statePayload.selection?.version) ? statePayload.selection.version : 0;
+  // player-state exposes the persisted selection version at cut.selection_version.
+  // (Historical fallbacks retained for older payload shapes.)
+  const selectionVersion = Number.isInteger(statePayload.cut?.selection_version)
+    ? statePayload.cut.selection_version
+    : Number.isInteger(statePayload.selection_version)
+      ? statePayload.selection_version
+      : Number.isInteger(statePayload.selection?.version) ? statePayload.selection.version : 0;
   const previewState = createCutPreviewState(selected, selectionVersion);
   const source = statePayload.analysis?.source || statePayload.cut?.analysis_source || "vad";
   const sourceInputs = [...elements.cutSourceGroup.querySelectorAll('input[name="analysisSourceChoice"]')];
@@ -1768,7 +1801,7 @@ function setupCutReview(projectId, elements, statePayload, clips, render, refres
           body: JSON.stringify({ params, analysis_source: selectedSource }),
         });
         const candidate = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(candidate.detail || `Generation failed (${response.status})`);
+        if (!response.ok) throw new Error(apiErrorMessage(candidate.detail, `Generation failed (${response.status})`));
         validateContiguousClips(candidate.clips || []);
         previewState.previewCut(candidate);
         clips.splice(0, clips.length, ...candidate.clips);
@@ -1805,7 +1838,9 @@ function setupCutReview(projectId, elements, statePayload, clips, render, refres
         body: JSON.stringify({ cut_id: candidate.cut_id, expected_version: previewState.selectionVersion }),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(response.status === 409 ? "Selection conflict: reload and review the current cut before saving." : (result.detail || `Save failed (${response.status})`));
+      if (!response.ok) throw new Error(response.status === 409
+        ? "Selection conflict: reload and review the current cut before saving."
+        : apiErrorMessage(result.detail, `Save failed (${response.status})`));
       previewState.commit(candidate, result.version ?? result.selection_version ?? candidate.selection_version ?? previewState.selectionVersion + 1);
       statePayload.cut = candidate;
       if (elements.currentCutLabel) elements.currentCutLabel.textContent = candidate.name || sourceChoiceDisplay(candidate.analysis_source);

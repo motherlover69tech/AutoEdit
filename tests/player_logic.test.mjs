@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  apiErrorMessage,
   chooseMediaUrl,
   createManualOverrideState,
   createPlayerStateStore,
@@ -50,6 +51,17 @@ assert.equal(cutEndMs([{ timeline_in_ms: 0, dur_ms: -5 }]), null);
 assert.equal(cutEndMs([{ timeline_in_ms: 1.5, dur_ms: 100 }]), null);
 assert.equal(cutEndMs(null), null);
 assert.equal(cutEndMs([{ timeline_in_ms: 0, dur_ms: 100 }]), 100);
+// apiErrorMessage — FastAPI validation detail is a structured array; the old
+// `new Error(detail)` path rendered it as "[object Object]".
+assert.equal(apiErrorMessage([{ loc: ['body', 'expected_version'], msg: 'Input should be greater than or equal to 1' }], 'fallback'),
+  'body.expected_version: Input should be greater than or equal to 1');
+assert.equal(apiErrorMessage('plain message', 'fallback'), 'plain message');
+assert.equal(apiErrorMessage('', 'fallback'), 'fallback');
+assert.equal(apiErrorMessage(undefined, 'fallback'), 'fallback');
+assert.equal(apiErrorMessage({ msg: 'object message' }, 'fallback'), 'object message');
+assert.equal(apiErrorMessage({ detail: 'nested detail' }, 'fallback'), 'nested detail');
+assert.equal(apiErrorMessage([{ loc: ['body'], msg: 'first' }, { loc: ['query'], msg: 'second' }], 'fallback'),
+  'body: first; query: second');
 assert.deepEqual(validateContiguousClips(clips), { totalDurationMs: 2000 });
 assert.throws(() => validateContiguousClips([{ ...clips[1], timeline_in_ms: 10 }]), /non-contiguous/);
 assert.throws(() => validateContiguousClips([]), /empty/);
