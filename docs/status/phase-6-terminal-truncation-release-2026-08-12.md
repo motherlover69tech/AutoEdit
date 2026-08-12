@@ -12,7 +12,7 @@
 ## Live state (independently verified 2026-08-12 ~05:20 UTC)
 
 - Container `autoedit-app-1`: running, restarts 0, image `sha256:8133558f86f2e72adf17afebdc1476ee355cc5b9b5054a4103fd5b300a759477`; deployed `api.py` sha256 `4c076fa7699f1125197c1f226d7fae6c336ab35f6f7c88a2bcfc14a76571f9b7` == worktree file at `1d5886a`.
-- Live WhisperX candidate: **HTTP 200**, cut `01KZT3372CDNV7SBKK18STZRZ2`, `selected=false`, 348 clips, last clip end **666,167 ms**.
+- Live WhisperX candidate: **HTTP 200**, cut `01KZT3372CDNV7SBKK18STZR2Z` (NOTE: handoff typo `...STZRZ2` corrected — real ID ends `STZR2Z`), **selected=true as of 2026-08-12 ~17:14 UTC (version 2)**, 348 clips, last clip end **666,167 ms**.
 - `truncation` object (exact, identical in API response, DB `cuts.cdl_json`, immutable `edit/cdl_whisperx_phase6-20260811T234633Z.json`, and `activity-whisperx.json`):
   - `applied=true`, `reason_code=terminal_authorized_camera_coverage_exhausted`, `original_artifact_end_ms=671296`, `candidate_end_ms=666167`, `omitted_tail_duration_ms=5129`
 - `activity-whisperx.json` keeps the full 671,296 ms timeline (evidence preserved).
@@ -41,7 +41,7 @@
 1. **Fix the deploy wrapper parser** in `scripts/autoedit-deploy.sh` — **DONE 2026-08-12 (`a2ac9a8`):** the wrapper now takes the LAST bare `RESULT:` line (terminal verdict) via `tail -1` instead of the first (`mutation_started`), and retains the remote exit code (`REMOTE_RC`) in the JSON. Parser validated against success/failure/dry-run/rollback transcript shapes. **Confirmed live on the 743d801 deploy:** Publisher JSON returned `verdict: DEPLOYED_AND_VERIFIED, remote_rc: 0` — no misparse. New Publisher cards no longer need the "wrapper may misparse" caveat.
 2. **Integrate branch → master:** **DONE 2026-08-12 (`a60680b` on origin/master):** `phase6-confirmation-projection-spec` fast-forwarded into master (`63085e7` → `7b0d27f`), then wrapper fix + docs committed and pushed. Remote master SHA == local.
 3. **Product question (player tail) — RESOLVED 2026-08-12 (Peter decision):** the player must DISREGARD the tail. There will always be a short tail (a couple of seconds); no angle switching or audio processing on it. The player stops when the first feed / cut content ends. Implemented in `743d801` (`cutEndMs(clips)` helper; `render()` pauses the master clock at cut end; play at/past end replays from top) — **deployed live** (player.js `77c586c9` verified on Tower).
-4. **Optional (open):** select candidate `01KZT3372CDNV7SBKK18STZRZ2` as the chosen cut via the existing save endpoint (currently `selected=false`; VAD cut remains selected). Explained to Peter 2026-08-12 — awaiting his call.
+4. **Select WhisperX candidate — DONE 2026-08-12 ~17:14 UTC (Peter request):** cut `01KZT3372CDNV7SBKK18STZR2Z` (correct ID — handoff typo `...STZRZ2`) is now the selected cut via `PUT /projects/01KXPHM8XCBKZ96Y2JN6T9Q2MC/cut-selection` (version 1→2, selected_by reviewer account `autoedit-test`). Verified: DB `project_cut_selections` row updated; `edit/cdl.json` mirror rewritten (17:14, `analysis_source: whisperx`, truncation present); player-state returns the WhisperX cut (348 clips, last clip end 666,167 ms). The player's cut-end stop (tail handling) now stops playback at 666,167 ms.
 5. **Rollback path** if ever needed: `docker tag autoedit-rollback:20260812T041713Z autoedit-app` + recreate (or redeploy prior backup). Newer rollback tag from the 743d801 frontend deploy: `publisher-743d801-20260812T170438Z` backup dir; image `sha256:4d892aee...`.
 
 ## Re-verification (read-only)
