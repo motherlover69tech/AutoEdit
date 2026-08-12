@@ -4,15 +4,19 @@
 **Scope:** acceptance specification only; no product implementation or production mutation
 **Production constraint:** keep `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock` until this plan's gates and the later explicit rollout decision pass
 **Authoritative sources:** `docs/plans/ai-gpu-1-corrective-pickup.md`, `docs/plans/whisperx-speaker-aware-ai-roadmap.md`, `docs/ai/whisperx-evaluation-protocol.md`, `jobs/BACKLOG.md`, `AI_HANDOFF.md`, `docs/plans/TESTING_STRATEGY.md`, and `docs/DEPLOYMENT.md`
+**Current implementation inspected:** `7b0d27ffe1332236d3e56967739e13c9eced7886` plus the pre-existing dirty changes listed in Section 2.1; this Designer task did not alter those product files
+**Provider preflight:** the active `autoeditdesigner` profile declares `custom:9Router` / `cx/gpt-5.6-sol`; the card has no conflicting route override, and a minimal completion on that exact declared route returned `ROUTE_OK`. OpenRouter was not used as primary, fallback, auxiliary, MoA, or delegation.
 
 ## 1. Decision and scope
 
-The remaining AI-GPU-1 application-acceptance work is split into four ordered gates:
+The remaining AI-GPU-1 application-acceptance work is split into four ordered,
+controlling requirements. These IDs are stable and must be used in the acceptance
+record, Kanban evidence, compliance matrix, and any correction cards:
 
-1. aligned word timing on the program-audio master timeline;
-2. operator-confirmed speaker identity mapping;
-3. speaker-turn-driven cut acceptance; and
-4. valid peak-VRAM and Dots TTS coexistence measurement.
+1. **GATE-1** — aligned word timing on the program-audio master timeline;
+2. **GATE-2** — operator-confirmed speaker identity mapping with current-voice revalidation;
+3. **GATE-3** — speaker-turn-driven cut acceptance end to end; and
+4. **GATE-4** — valid peak-VRAM and Ollama/Dots coexistence measurement.
 
 A gate passes only from the current immutable worker image, current source, a hash-bound consent-cleared fixture, and complete evidence. Historical post-job VRAM snapshots, an isolated diarization smoke, anonymous speaker labels, mock output, or another agent's summary are not substitutes.
 
@@ -22,16 +26,19 @@ Passing these gates establishes that the application path is eligible for an exp
 
 ### 2.1 Verified facts
 
-- The current profile route was read as `openai-codex` / `gpt-5.6-sol`, with an empty fallback chain, MoA disabled, and every auxiliary route pinned to the same provider/model. A fresh minimal live completion returned `ROUTE_OK`. OpenRouter was not used.
+- The active profile route and live route check are recorded in the document header. The card has no provider/model override and no OpenRouter route was used.
 - Corrective artifact and Phase 4 resolver reviews are recorded as `PASS`.
 - A hash-bound queued ASR/alignment run and a constrained two-speaker diarization run completed on the V100. The latter sampled 8,024 MiB at one-second intervals; this is not a Dots coexistence result.
 - The authoritative timeline convention is `source_ms = master_ms + sync_offset_ms`; worker results are projected with `master_ms = source_ms - sync_offset_ms` and negative pre-roll is clipped.
 - `AIResultArtifact` stores strict integer-ms program-audio-master timestamps, anonymous diarization turns, speaker mappings, and resolved turns with provenance.
 - `resolve_speaker_mappings()` supports current operator confirmation, current voice revalidation, anonymous-label swaps, audit-only transcript context, and fail-closed conflicts.
-- The application does not yet contain a resolved-turn-to-activity bridge, a durable speaker-confirmation API/UI, or the trusted-host golden-media integration test named in the roadmap. The tracked golden fixture files remain `not_labeled` placeholders.
-- The current cut engine consumes `{start_ms, end_ms, active}` activity. It contains reason labels for unresolved and low-confidence wides, but an unmapped solo speaker currently produces no clip rather than an explicit safe-wide segment. That is not acceptable for speaker-turn authority.
+- The repository now contains the resolved-turn activity bridge, durable speaker-confirmation schema/API/UI, explicit VAD/WhisperX candidate generation, selected-cut persistence, trusted-host fixture validator, safe-wide cut integration, and an offline GPU evidence harness. Their existence is implementation progress, not acceptance evidence.
+- The tracked `tests/fixtures/golden_interview/expected/*.json` files remain `not_labeled` placeholders. The trusted-host integration test skips when `AUTOEDIT_GOLDEN_MEDIA_ROOT` is absent, as required; no consent-controlled real fixture or passing live acceptance record was available in this Designer workspace.
+- The current GPU harness validates redacted schemas, offline/mock behavior, bounded local read-only discovery, and fail-closed conditions. Its `execute` mode intentionally refuses live workloads. **GATE-4 therefore still needs a separately reviewed, explicitly authorized live executor/adapter before it can be run; mock harness output is ineligible.**
+- The current cut engine consumes compatible `{start_ms, end_ms, active}` activity, protects safe-wide spans, and persists immutable candidates. Recent Phase 6 corrective work addresses confirmed raw-turn projection and terminal source-coverage policy. These seams still require exact-candidate compliance plus consent-controlled GATE-3 evidence.
+- The worktree was already dirty before this card in `scripts/autoedit-deploy.sh`, `src/autoedit/api.py`, and `src/autoedit/web/player.js`. Those changes were inspected as context but are not modified or approved by this specification.
 - Production remains mock-backed. Proxies are silent; program audio is the browser master clock; source media must not play in the browser.
-- The opt-in worker is private on host loopback through merged Compose, uses the V100, reads `/data` read-only, is single-concurrency, and pins ASR model, compute type, language, alignment, and maximum batch size server-side.
+- The opt-in worker is private on host loopback at `127.0.0.1:8011` through merged Compose, uses the V100, reads `/data` read-only, is single-concurrency, and pins ASR model, compute type, language, alignment, and maximum batch size server-side.
 
 ### 2.2 Assumptions to validate at acceptance preflight
 
@@ -122,6 +129,39 @@ Agents may prepare snippets, calculate errors, execute tests, inspect payloads, 
 - **TEST-AIGPU1-007:** Evidence identifies source commit, worker image digest, model/runtime versions, Compose render hash, opaque fixture/run IDs, project FPS, automatic sync offsets, commands, results, and Peter's explicit decisions without private content.
 - **TEST-AIGPU1-008:** Failure tests prove malformed worker output, wrong hash, unavailable worker, persistence failure, stale mapping, unresolved identity, missing wide camera, Dots failure, and VRAM threshold failure all fail closed.
 
+### Controlling gate requirements
+
+- **GATE-1 — Frame-level word timing.** This gate is `PASS` only when one current,
+  hash-bound real worker artifact is compared with Peter-approved audible boundaries
+  for exactly the deterministic selection protocol in Section 5. All six checked
+  boundaries must be within one exact project frame; a structural word-count test,
+  self-authored two-field `PASS` file, mock fixture, or historical run cannot pass it.
+- **GATE-2 — Confirmed speaker identity.** This gate is `PASS` only when Peter's
+  complete bijective mapping is persisted and reloaded for the current artifact,
+  every anonymous label has representative current-voice evidence, stale versions
+  are rejected, and an anonymous-label-swap rerun retains stable identity only via
+  current voice revalidation or fresh confirmation. Suggested mappings, transcript
+  names, LLM context, channel order, and prior anonymous labels are never identity
+  truth.
+- **GATE-3 — Speaker-turn cut acceptance.** This gate is `PASS` only when a candidate
+  generated from the GATE-1 artifact and GATE-2 confirmations passes activity/CDL
+  validation, immutable persistence, selected-cut/player evidence, all locked safety
+  windows, program-audio-master continuity, and Peter's per-window editorial review.
+  Generation alone, unit tests alone, or an unsaved in-memory preview cannot pass it.
+- **GATE-4 — Coexistence measurements.** This gate is `PASS` only from a valid,
+  explicitly authorized V100 run with continuous <=250 ms sampling, Ollama unloaded,
+  Dots in Peter's intended resident/unloaded state, cold and active-overlap WhisperX
+  phases, successful outputs, complete process attribution, required headroom, and
+  cleanup/mock verification. Post-job snapshots, offline/mock harness data, readiness
+  peaks without jobs, or unloading intended Dots residency cannot pass it.
+
+Each gate records one of `NOT_RUN`, `BLOCKED`, `FAIL`, or `PASS`, plus exact-candidate
+references and evidence pointers. `PASS` is immutable for that evidence bundle but
+becomes inapplicable—not silently reusable—when its source commit, worker digest,
+artifact version, fixture revision, FPS, automatic offsets, model/runtime settings,
+or required human decision changes. A rerun creates a new record. The overall
+AI-GPU-1 acceptance is `PASS` only when `GATE-1..4` are all current `PASS` records.
+
 ## 4. Gate entry criteria and shared evidence
 
 All four gates use one acceptance record rooted outside Git, for example:
@@ -156,7 +196,7 @@ Shared entry conditions:
 
 ## 5. Exact acceptance gates
 
-### Gate 1 — Word timing within one project frame
+### GATE-1 — Word timing within one project frame
 
 **Dependencies:** shared entry conditions only.
 
@@ -189,9 +229,9 @@ end_error_ms   = abs(aligned_end_ms   - reviewed_end_ms)
 
 **Failure:** keep mock, retain the failed immutable run, and correct alignment/audio-timeline handling. Manual sync adjustment is not an allowed remedy.
 
-### Gate 2 — Confirmed speaker identity mapping
+### GATE-2 — Confirmed speaker identity mapping with current-voice revalidation
 
-**Dependencies:** Gate 1 passes; durable confirmation API/UI and artifact import exist.
+**Dependencies:** GATE-1 passes; durable confirmation API/UI and artifact import exist.
 
 **Confirmation protocol:**
 
@@ -217,9 +257,9 @@ end_error_ms   = abs(aligned_end_ms   - reviewed_end_ms)
 
 **Failure:** the affected identity stays unresolved and all its intervals must route wide. No close-up authority is allowed.
 
-### Gate 3 — Speaker-turn cut acceptance
+### GATE-3 — Speaker-turn cut acceptance
 
-**Dependencies:** Gates 1 and 2 pass; a reviewed resolved-turn activity bridge and safe-wide cut integration exist.
+**Dependencies:** GATE-1 and GATE-2 pass; a reviewed resolved-turn activity bridge and safe-wide cut integration exist.
 
 **Mandatory labelled review windows:** the acceptance fixture must contain at least one certain ground-truth window for each applicable category below. If one fixture cannot provide them, add another consent-cleared excerpt rather than fabricating a case.
 
@@ -260,9 +300,9 @@ Ground-truth windows and intended cameras are locked before generating the candi
 
 **Failure:** retain VAD/mock and the prior selected cut. Create a bounded correction for activity projection, identity policy, cut policy, source bounds, player behavior, or evidence persistence as indicated; do not tune sync manually.
 
-### Gate 4 — Peak VRAM and Dots TTS coexistence
+### GATE-4 — Peak VRAM and Ollama/Dots TTS coexistence
 
-**Dependencies:** Gate 3 passes; Peter authorizes a bounded Unraid/Dots acceptance window; read-only discovery is complete.
+**Dependencies:** GATE-3 passes; Peter authorizes a bounded Unraid/Dots acceptance window; read-only discovery is complete.
 
 **Fixed configuration:**
 
@@ -449,11 +489,11 @@ docker compose -f docker-compose.yml -f docker-compose.gpu-ai.yml \
 
 The live GPU/Dots harness must be a reviewed script, not an ad hoc shell transcript. It must fail non-zero on sampler gaps, missing phase markers, invalid jobs, unknown GPU processes, insufficient headroom, service restarts, Ollama residency, cleanup drift, or non-mock production values.
 
-## 12. Bounded implementation work packages
+## 12. Bounded implementation and evidence work packages
 
 Each package is small enough for one Programmer worktree. No package may self-approve; each requires independent Designer compliance before Tester execution.
 
-### Package A — trusted fixture/evaluation harness
+### Package A — trusted fixture/evaluation harness and GATE-1 evidence
 
 **Owns:** `tests/integration/test_whisperx_golden_media.py`, new fixture-schema helpers, `tests/fixtures/golden_interview/` schemas/README, and narrowly related protocol updates.
 
@@ -461,7 +501,13 @@ Each package is small enough for one Programmer worktree. No package may self-ap
 
 **Dependency:** consent-cleared secure fixture and Peter-approved ground truth. No private media in the worktree.
 
-### Package B — confirmation persistence/API/UI
+**Current disposition:** the tracked contracts, adapter, synthetic tests, and
+trusted-host integration entry point exist. Acceptance remains blocked until a
+private consent-cleared set of at least three excerpts is present, one qualifying
+fixture is bound to a real current artifact, Peter has approved its word truth, and
+the resulting GATE-1 evidence passes. Placeholder tracked JSON is ineligible.
+
+### Package B — confirmation persistence/API/UI and GATE-2 evidence
 
 **Owns:** speaker-confirmation DB migration/schema, API endpoints, confirmation service, `src/autoedit/web/app.html`, `app.js`, `styles.css`, and dedicated API/static tests.
 
@@ -469,7 +515,13 @@ Each package is small enough for one Programmer worktree. No package may self-ap
 
 **Dependency:** current reviewed artifact/resolver contracts. Must not modify cut projection.
 
-### Package C — artifact import, activity projection, and cut integration
+**Current disposition:** schema, API, app UI, and contract tests exist. Before a
+GATE-2 run, independent compliance must verify current-voice revalidation is wired
+through the application path—not merely available in the lower-level resolver—and
+Tester must capture authenticated reload, stale-version, conflict, and label-swap
+evidence against the exact candidate. Peter's real identity decision remains required.
+
+### Package C — artifact import, activity projection, cut integration, and GATE-3 evidence
 
 **Owns:** a new importer/projection module such as `src/autoedit/ai/import_results.py` and `activity_from_turns.py`, narrowly required API orchestration, cut/timeline/player-state integration, and dedicated tests.
 
@@ -477,19 +529,47 @@ Each package is small enough for one Programmer worktree. No package may self-ap
 
 **Dependency:** Package B confirmation contract. Must preserve existing VAD artifacts and selected cuts.
 
-### Package D — reviewed live-acceptance harness and runbook
+**Current disposition:** the bridge, cut safety, explicit source, immutable candidate,
+selection, player projection, and focused correction tests exist. Recent corrective
+commits and the dirty exact-candidate files mean GATE-3 requires a fresh independent
+compliance review, a clean/pinned Tester candidate, private locked review windows,
+browser console/network/sync evidence, and Peter's per-window editorial decision.
 
-**Owns:** a new non-secret operations harness under `scripts/`, its tests, redacted evidence schema, and acceptance-runbook updates. It does not own Compose defaults or production deployment.
+### Package D1 — reviewed offline acceptance harness and runbook
+
+**Owns:** the non-secret operations harness under `scripts/`, its tests, redacted evidence schema, and acceptance-runbook updates. It does not own Compose defaults or production deployment.
 
 **Requires:** all `OPS-AIGPU1-*`, `SEC-AIGPU1-002`, `SEC-AIGPU1-003`, `TEST-AIGPU1-005`, `TEST-AIGPU1-007`.
 
-**Dependency:** Packages A-C pass compliance; Peter supplies an approved Dots/Unraid acceptance window. Begin with read-only discovery.
+**Dependency:** none for offline validation. It cannot claim live acceptance.
 
-### Package E — independent acceptance execution
+**Current disposition:** the safe harness, canonical redacted schema, and extensive
+offline tests exist. Its mock evidence correctly states `acceptance_pass=false`, and
+its live `execute` mode is disabled. Independent compliance of the exact harness is
+still required before adding a live adapter.
 
-**Owner:** Tester profile, after independent Designer compliance passes Packages A-D.
+### Package D2 — authorized live GATE-4 executor/adapter
 
-**Requires:** execute all four gates, real browser evidence, console/network inspection, responsive/accessibility checks, live GPU/Dots evidence, and Peter's decisions. Tester reports `TEST_PASS` only if every criterion passes; otherwise it creates reproducible bounded defects.
+**Depends on:** Packages A-C compliance and GATE-1..3 `PASS`; Package D1 compliance;
+current read-only Tower/Dots discovery; and Peter's exact host/fixture/window/action/
+cleanup authorization.
+
+**Owns:** a narrowly isolated live adapter/executor and direct tests for every external
+boundary required by `docs/plans/ai-gpu-1-acceptance-runbook.md`. It may call only
+reviewed allowlisted operations, must present the action plan before mutation, must
+sample continuously, and must feed the existing canonical redacted validator. It
+does not own Compose defaults, Unraid templates, production backend values, or Dots
+quality settings. One Programmer worktree implements it; an independent Designer
+reviews it before Tester may execute it.
+
+**Acceptance blocker:** without D2, GATE-4 remains `NOT_RUN`/`BLOCKED`; a human may
+not substitute an ad hoc shell transcript or manually mark mock evidence live.
+
+### Package E — independent four-gate acceptance execution
+
+**Owner:** Tester profile, after independent Designer compliance passes Packages A-C, D1, and D2.
+
+**Requires:** execute all four gates in order, real browser evidence, console/network inspection, responsive/accessibility checks, live GPU/Dots evidence, and Peter's decisions. Tester reports `TEST_PASS` only if every criterion passes; otherwise it creates reproducible bounded defects. A final Designer compliance card then maps every requirement and GATE ID to direct evidence; Tester success alone is not rollout authority.
 
 ## 13. Deployment, cleanup, and later rollout
 
@@ -530,10 +610,10 @@ After all four gates pass:
 
 | Gate | Requirements | Required evidence | Decision owner |
 |---|---|---|---|
-| 1 | `ARCH-AIGPU1-002`, `BACKEND-AIGPU1-001/002`, `TEST-AIGPU1-002` | Valid artifact, FPS/offset record, three words/six boundary errors, Peter marks | Agent calculation + Peter audible decision |
-| 2 | `BACKEND-AIGPU1-003/007`, `UI-AIGPU1-001..006`, `TEST-AIGPU1-003` | Two snippets/label, confirmed bijection, reload, stale/label-swap/conflict tests | Peter identity decision + agent contract evidence |
-| 3 | `ARCH-AIGPU1-003/005`, `BACKEND-AIGPU1-004..006`, `UI-AIGPU1-007`, `TEST-AIGPU1-004/008` | Locked windows, activity/CDL/persistence validators, browser console/network/media evidence, Peter per-window result | Peter editorial decision + agent/tester evidence |
-| 4 | `OPS-AIGPU1-001..008`, `SEC-AIGPU1-002/003`, `TEST-AIGPU1-005/007` | Discovery/render, <=250 ms samples, cold/resident/active phases, output/health/headroom/cleanup | Agent measurement + Peter window/state approval |
+| `GATE-1` | `ARCH-AIGPU1-002`, `BACKEND-AIGPU1-001/002`, `TEST-AIGPU1-002` | Valid artifact, FPS/offset record, three words/six boundary errors, Peter marks | Agent calculation + Peter audible decision |
+| `GATE-2` | `BACKEND-AIGPU1-003/007`, `UI-AIGPU1-001..006`, `TEST-AIGPU1-003` | Two snippets/label, confirmed bijection, reload, stale/current-voice/label-swap/conflict tests | Peter identity decision + agent contract evidence |
+| `GATE-3` | `ARCH-AIGPU1-003/005`, `BACKEND-AIGPU1-004..006`, `UI-AIGPU1-007`, `TEST-AIGPU1-004/008` | Locked windows, activity/CDL/persistence/selection validators, browser console/network/media evidence, Peter per-window result | Peter editorial decision + agent/tester evidence |
+| `GATE-4` | `OPS-AIGPU1-001..008`, `SEC-AIGPU1-002/003`, `TEST-AIGPU1-005/007` | Discovery/render, <=250 ms samples, cold/resident/active phases, output/health/headroom/cleanup | Agent measurement + Peter window/state approval |
 
 A final compliance reviewer must expand this table to every individual requirement ID and cite source, test, runtime, UI, and operational evidence. A summary without direct evidence cannot pass.
 
