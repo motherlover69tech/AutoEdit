@@ -6,7 +6,7 @@ import logging
 import mimetypes
 from pathlib import Path
 from secrets import compare_digest
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NoReturn
 
 import json
 import shutil
@@ -3073,9 +3073,17 @@ def create_app(
         # black gaps in the edit. Trim the timeline tail so the last clip
         # never references source media past its probed duration; only the
         # tail is touched, so clip contiguity is preserved.
-        angle_duration_ms = {
-            a.id: int(a.duration_ms) for a in angle_rows if a.duration_ms
-        }
+        # Source bounds are authoritative metadata, not an optional hint.  A
+        # missing/invalid duration must never be interpreted as unlimited
+        # media, especially at the terminal truncation seam.
+        angle_duration_ms: dict[str, int] = {}
+        for angle in angle_rows:
+            try:
+                duration = int(angle.duration_ms)
+            except (TypeError, ValueError):
+                continue
+            if duration > 0:
+                angle_duration_ms[angle.id] = duration
         fnum, fden = project["fps_num"], project["fps_den"]
         clips_list = cdl.get("clips", [])
 
@@ -3107,9 +3115,22 @@ def create_app(
             if src_in < 0:
                 return False
             media_ms = angle_duration_ms.get(clip["angle_id"])
+            if ai_artifact is not None and not media_ms:
+                return False
             if media_ms is not None and src_in + int(clip["dur_ms"]) > media_ms:
                 return False
             return True
+
+        def _terminal_coverage_failure() -> NoReturn:
+            _emit_cut_event(
+                "candidate_failed",
+                project_id=project_id,
+                analysis_source=analysis_source,
+                artifact_version_value=(artifact_version(ai_artifact) if ai_artifact is not None else None),
+                error_code="terminal_source_coverage_ineligible",
+                duration_ms=round((time.monotonic() - started_at) * 1000),
+            )
+            raise HTTPException(status_code=422, detail="AI cut generation failed closed: terminal source coverage is ineligible")
 
         def _fallback_clip(t_in: int, t_out: int, original: dict, previous_angle_id: str | None) -> dict | None:
             preferred = ([wide_angle_id] if ai_artifact is not None else [base_angle_id, previous_angle_id, *speaker_to_angle.values()])
@@ -3136,6 +3157,11 @@ def create_app(
 
         repaired_clips: list[dict] = []
         uncovered_intervals: list[tuple[int, int, dict]] = []
+        if ai_artifact is not None and any(
+            not angle_duration_ms.get(str(clip.get("angle_id")), 0)
+            for clip in clips_list
+        ):
+            _terminal_coverage_failure()
         for clip in clips_list:
             t_in = int(clip["timeline_in_ms"])
             t_out = t_in + int(clip["dur_ms"])
@@ -3164,6 +3190,9 @@ def create_app(
                         repaired_clips.append(resumed)
                 continue
             media_ms = angle_duration_ms.get(clip["angle_id"])
+            if ai_artifact is not None and not media_ms:
+                uncovered_intervals.append((t_in, t_out, clip))
+                continue
             if media_ms is not None and src_in + int(clip["dur_ms"]) > media_ms:
                 # The requested camera runs out before this timeline segment
                 # ends. Keep the valid leading portion and fill the overrun
@@ -3214,7 +3243,7 @@ def create_app(
                 "candidate_end_ms": expected_end,
             })
             if not clips_list or clips_list[0]["timeline_in_ms"] != 0:
-                raise HTTPException(status_code=422, detail="AI cut generation failed closed: no complete source-bound CDL")
+                _terminal_coverage_failure()
             if actual_end != expected_end:
                 uncovered_intervals.sort(key=lambda item: (item[0], item[1]))
                 merged: list[tuple[int, int, list[dict]]] = []
@@ -3228,17 +3257,41 @@ def create_app(
                 terminal_start = merged[0][0] if merged else None
                 eligible = bool(merged and merged[-1][1] == expected_end and len(merged) == 1)
                 if eligible:
-                    # A terminal exception requires actual confirmed solo
-                    # speech, not merely silence or an unsafe-wide state.
-                    eligible = any(
-                        item.get("start_ms", 0) < merged[0][1]
+                    # Every uncovered item in the terminal suffix must be a
+                    # confirmed, single-speaker segment.  A safe-looking
+                    # confirmed segment must not authorize a suffix that also
+                    # contains unresolved, low-confidence, overlap, or
+                    # off-camera coverage loss.
+                    suffix_items = [
+                        item for item in timeline
+                        if item.get("start_ms", 0) < expected_end
                         and item.get("end_ms", 0) > merged[0][0]
-                        and len(item.get("active", [])) == 1
-                        and not any(item.get(flag) for flag in ("unresolved", "low_confidence", "overlap", "off_camera"))
-                        and speaker_to_angle.get(item["active"][0])
-                        and wide_angle_id
-                        for item in timeline
-                    )
+                    ]
+                    unsafe_reasons = {
+                        "unresolved",
+                        "low_confidence",
+                        "overlap",
+                        "off_camera",
+                    }
+                    if any(
+                        item.get(flag) or str(item.get("reason", "")).split(":", 1)[0] in unsafe_reasons
+                        for item in suffix_items
+                        for flag in ("unresolved", "low_confidence", "overlap", "off_camera")
+                    ):
+                        eligible = False
+                    else:
+                        eligible = any(
+                            item.get("start_ms", 0) < merged[0][1]
+                            and item.get("end_ms", 0) > merged[0][0]
+                            and len(item.get("active", [])) == 1
+                            and not any(
+                                item.get(flag) or str(item.get("reason", "")).split(":", 1)[0] in unsafe_reasons
+                                for flag in ("unresolved", "low_confidence", "overlap", "off_camera")
+                            )
+                            and speaker_to_angle.get(item["active"][0])
+                            and wide_angle_id
+                            for item in timeline
+                        )
                 if eligible and terminal_start is not None:
                     candidate_end = _floor_frame_ms(terminal_start)
                     if candidate_end <= 0:
@@ -3267,12 +3320,12 @@ def create_app(
                                 "omitted_tail_duration_ms": expected_end - candidate_end,
                             })
                 if not eligible:
-                    raise HTTPException(status_code=422, detail="AI cut generation failed closed: no complete source-bound CDL")
+                    _terminal_coverage_failure()
 
         while clips_list:
             last = clips_list[-1]
             media_ms = angle_duration_ms.get(last["angle_id"])
-            if media_ms is None:
+            if media_ms is None or (ai_artifact is not None and not media_ms):
                 break
             available = media_ms - last["src_in_ms"]
             if last["dur_ms"] <= available:
@@ -3301,7 +3354,11 @@ def create_app(
             cdl,
             project["fps_num"],
             project["fps_den"],
-            source_durations_ms=angle_duration_ms,
+            source_durations_ms=(
+                angle_duration_ms
+                if ai_artifact is not None
+                else {angle_id: duration for angle_id, duration in angle_duration_ms.items() if duration > 0}
+            ),
         )
         cdl["validation"] = cut_validation
         if not cut_validation.get("valid"):
