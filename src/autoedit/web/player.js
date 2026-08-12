@@ -6,6 +6,24 @@ export function findClipAtTime(clips, tMs) {
   }) || null;
 }
 
+/**
+ * End of the cut content in master-timeline milliseconds — the last clip's
+ * timeline_out. Playback must stop here: the program audio master may run
+ * longer (a short tail after the final covered frame), and that tail is
+ * deliberately disregarded (no angle switching or audio processing on it).
+ * @param {Array<{timeline_in_ms: number, dur_ms: number}>} clips
+ * @returns {number|null} end ms, or null when there are no clips.
+ */
+export function cutEndMs(clips) {
+  if (!Array.isArray(clips) || clips.length === 0) return null;
+  let end = 0;
+  for (const clip of clips) {
+    if (!Number.isInteger(clip.timeline_in_ms) || !Number.isInteger(clip.dur_ms) || clip.dur_ms <= 0) return null;
+    end = Math.max(end, clip.timeline_in_ms + clip.dur_ms);
+  }
+  return end;
+}
+
 export function validateContiguousClips(clips) {
   if (!Array.isArray(clips) || clips.length === 0) {
     throw new Error("Player cut is empty; no authoritative timeline is available");
@@ -824,6 +842,7 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
   }
   const angleById = new Map(statePayload.angles.map((angle) => [angle.id, angle]));
   const clips = statePayload.cut.clips || [];
+  const contentEndMs = cutEndMs(clips);
   const override = createManualOverrideState();
   const frameSeconds = frameDurationSeconds(
     statePayload.project.fps_num,
@@ -1132,6 +1151,17 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
 
   function render(forceSwap = false) {
     const tMs = timelineMsFromAudio(elements.audio.currentTime);
+    // Stop at the end of the cut content. The program audio master may run
+    // a little longer (tail after the last covered frame); that tail is
+    // deliberately disregarded — pause here so the player stops when the
+    // first feed ends instead of playing audio over nothing.
+    if (contentEndMs !== null && tMs >= contentEndMs) {
+      if (!elements.audio.paused) {
+        elements.audio.pause();
+        setStatus(elements, "End of cut");
+      }
+      return;
+    }
     const autoClip = findClipAtTime(clips, tMs);
     const manualAngleId = override.manualAngleId;
     const angleId = override.resolve(autoClip?.angle_id);
@@ -1211,7 +1241,14 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
     render(true);
   });
   elements.qualitySelect.addEventListener("change", () => render(true));
-  elements.audio.addEventListener("play", () => visible.play().catch(() => undefined));
+  elements.audio.addEventListener("play", () => {
+    // If playback is (re)started at or past the end of the cut, replay from
+    // the top instead of letting the disregarded audio tail play over nothing.
+    if (contentEndMs !== null && timelineMsFromAudio(elements.audio.currentTime) >= contentEndMs) {
+      elements.audio.currentTime = 0;
+    }
+    visible.play().catch(() => undefined);
+  });
   elements.audio.addEventListener("pause", () => visible.pause());
   elements.audio.addEventListener("seeking", () => render(true));
   elements.audio.addEventListener("timeupdate", () => render(false));

@@ -4,6 +4,7 @@ import {
   createManualOverrideState,
   createPlayerStateStore,
   analysisStatusDisplay,
+  cutEndMs,
   findClipAtTime,
   findNextClip,
   formatTimelineMs,
@@ -38,6 +39,17 @@ assert.equal(findClipAtTime(clips, 1000).angle_id, 'b');
 assert.equal(findNextClip(clips, 500).angle_id, 'b');
 assert.equal(findNextClip(clips, 1500), null);
 assert.equal(findClipAtTime(clips, 2500), null);
+// cutEndMs — playback must stop at the last clip's timeline_out; a trailing
+// program-audio tail after the final covered frame is deliberately disregarded.
+assert.equal(cutEndMs(clips), 2000);
+assert.equal(cutEndMs([]), null);
+assert.equal(cutEndMs([{ timeline_in_ms: 0, dur_ms: 1000 }]), 1000);
+assert.equal(cutEndMs([{ timeline_in_ms: 1000, dur_ms: 500 }, { timeline_in_ms: 0, dur_ms: 900 }]), 1500);
+assert.equal(cutEndMs([{ timeline_in_ms: 0, dur_ms: 666167 }]), 666167);
+assert.equal(cutEndMs([{ timeline_in_ms: 0, dur_ms: -5 }]), null);
+assert.equal(cutEndMs([{ timeline_in_ms: 1.5, dur_ms: 100 }]), null);
+assert.equal(cutEndMs(null), null);
+assert.equal(cutEndMs([{ timeline_in_ms: 0, dur_ms: 100 }]), 100);
 assert.deepEqual(validateContiguousClips(clips), { totalDurationMs: 2000 });
 assert.throws(() => validateContiguousClips([{ ...clips[1], timeline_in_ms: 10 }]), /non-contiguous/);
 assert.throws(() => validateContiguousClips([]), /empty/);
