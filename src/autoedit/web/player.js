@@ -1758,6 +1758,9 @@ function setupCutReview(projectId, elements, statePayload, clips, render, refres
           lead_in_ms: parseInt(document.getElementById("cutLeadInMs")?.value, 10) || 0,
           tail_ms: parseInt(document.getElementById("cutTailMs")?.value, 10) || 0,
           silence_behaviour: document.getElementById("cutSilenceBehaviour")?.value || "wide",
+          wide_interval_ms: parseInt(document.getElementById("cutWideIntervalMs")?.value, 10) || 0,
+          overlap_min_ms: parseInt(document.getElementById("cutOverlapMinMs")?.value, 10) || 900,
+          interject_max_ms: parseInt(document.getElementById("cutInterjectMaxMs")?.value, 10) || 1200,
         };
         const response = await fetch(`/projects/${projectId}/cut`, {
           method: "POST", credentials: "same-origin",
