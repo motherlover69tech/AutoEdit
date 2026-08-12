@@ -983,6 +983,7 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
     const tlRes = await fetch(`/projects/${projectId}/timeline-state`, { credentials: "same-origin" });
     if (tlRes.ok) {
       timelineState = await tlRes.json();
+      elements.noteTimelineState = timelineState;
       renderTimeline(elements, timelineState, clips, angleById);
       // Render notes from timeline state
       if (timelineState.notes) {
@@ -1452,7 +1453,12 @@ async function loadNotesList(elements, projectId) {
     const res = await fetch(`/projects/${projectId}/notes`, { credentials: "same-origin" });
     if (!res.ok) return;
     const data = await res.json();
-    renderNoteList(elements, data.notes || []);
+    const notes = data.notes || [];
+    renderNoteList(elements, notes);
+    if (elements.noteTimelineState) {
+      elements.noteTimelineState.notes = notes;
+      renderNotes(elements, elements.noteTimelineState);
+    }
   } catch (_err) { /* ignore */ }
 }
 
@@ -1492,7 +1498,7 @@ function renderNoteList(elements, notes) {
         const res = await fetch(`/projects/${elements.audio.dataset.projectId || ""}/notes/${note.id}`,
           { method: "DELETE", credentials: "same-origin" });
         if (res.ok) {
-          loadNotesList(elements, elements.audio.dataset.projectId);
+          await loadNotesList(elements, elements.audio.dataset.projectId);
         }
       } catch (_err) { /* ignore */ }
     });
