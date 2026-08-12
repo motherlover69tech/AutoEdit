@@ -38,11 +38,11 @@
 
 ## Next steps (handoff)
 
-1. **Fix the deploy wrapper parser** in `scripts/autoedit-deploy.sh` — **DONE 2026-08-12 (`a2ac9a8`):** the wrapper now takes the LAST bare `RESULT:` line (terminal verdict) via `tail -1` instead of the first (`mutation_started`), and retains the remote exit code (`REMOTE_RC`) in the JSON. Parser validated against success/failure/dry-run/rollback transcript shapes. New Publisher cards no longer need the "wrapper may misparse" caveat.
-2. **Integrate branch → master:** **DONE 2026-08-12 (`a2ac9a8` on origin/master):** `phase6-confirmation-projection-spec` fast-forwarded into master (`63085e7` → `7b0d27f`), then wrapper fix + docs committed as `a2ac9a8` and pushed. Remote master SHA == local (`a2ac9a8`).
-3. **Product question (open):** UI/player treatment when the candidate video (666,167 ms) is shorter than program audio (671,296 ms) — needs a player/UI decision (freeze frame, silence, timeline affordance).
-4. **Optional:** select candidate `01KZT3372CDNV7SBKK18STZRZ2` as the chosen cut via the existing save endpoint (currently `selected=false`; VAD cut remains selected).
-5. **Rollback path** if ever needed: `docker tag autoedit-rollback:20260812T041713Z autoedit-app` + recreate (or redeploy prior backup).
+1. **Fix the deploy wrapper parser** in `scripts/autoedit-deploy.sh` — **DONE 2026-08-12 (`a2ac9a8`):** the wrapper now takes the LAST bare `RESULT:` line (terminal verdict) via `tail -1` instead of the first (`mutation_started`), and retains the remote exit code (`REMOTE_RC`) in the JSON. Parser validated against success/failure/dry-run/rollback transcript shapes. **Confirmed live on the 743d801 deploy:** Publisher JSON returned `verdict: DEPLOYED_AND_VERIFIED, remote_rc: 0` — no misparse. New Publisher cards no longer need the "wrapper may misparse" caveat.
+2. **Integrate branch → master:** **DONE 2026-08-12 (`a60680b` on origin/master):** `phase6-confirmation-projection-spec` fast-forwarded into master (`63085e7` → `7b0d27f`), then wrapper fix + docs committed and pushed. Remote master SHA == local.
+3. **Product question (player tail) — RESOLVED 2026-08-12 (Peter decision):** the player must DISREGARD the tail. There will always be a short tail (a couple of seconds); no angle switching or audio processing on it. The player stops when the first feed / cut content ends. Implemented in `743d801` (`cutEndMs(clips)` helper; `render()` pauses the master clock at cut end; play at/past end replays from top) — **deployed live** (player.js `77c586c9` verified on Tower).
+4. **Optional (open):** select candidate `01KZT3372CDNV7SBKK18STZRZ2` as the chosen cut via the existing save endpoint (currently `selected=false`; VAD cut remains selected). Explained to Peter 2026-08-12 — awaiting his call.
+5. **Rollback path** if ever needed: `docker tag autoedit-rollback:20260812T041713Z autoedit-app` + recreate (or redeploy prior backup). Newer rollback tag from the 743d801 frontend deploy: `publisher-743d801-20260812T170438Z` backup dir; image `sha256:4d892aee...`.
 
 ## Re-verification (read-only)
 
