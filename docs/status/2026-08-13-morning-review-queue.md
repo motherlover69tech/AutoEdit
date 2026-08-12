@@ -12,7 +12,7 @@ All five FINAL round-3 compliance checks were executed against the exact committ
 | **A Gate-1** (t_1cda8d9b) | 444f4fc+3b00689 | check RUNNING | — | verdict pending |
 | **B** (t_2c9e2be6) | 38e964e | FAIL | `resolve_speaker_mappings` called without current-voice evidence or prior confirmations; implicit single-row swap not a trustworthy bijection transaction; GET doesn't use the resolver; conflict/revalidation UI states unreachable; several UI items unmet | full resolver wiring (evidence + prior confirmations), transactional swap, GET via resolver, UI states, tests |
 | **C** (t_0abbb32c) | 330e67e | FAIL | product guards PASS (422/409/mirror) but the preservation tests still don't assert prior `cut_id`+`version` unchanged (mirror-bytes assertion incomplete; `prior_selection_project_id` is the project id, not the cut id) | snapshot + assert prior selection identity/version + exact mirror bytes in both scenarios |
-| **D1** (t_a380c78d) | 5bf56a6+57163b4 | check RUNNING | — | verdict pending |
+| **D1** (t_a380c78d) | 5bf56a6+57163b4 | FAIL (2nd) | rebuild improved forged-probe rejection 6→12 of 28 but 16 of 28 forged-invalid mutations still accepted; all ten findings remain open (no RenderOnlyComposeAdapter symbol, nine-category discovery absent, deep scan incomplete, VAL-TEST mapping gaps) | the ten findings again, with the reviewer's 16 remaining accepted mutations as the test spec |
 | **D2** (t_e629e9bf) | e1b6e93+1b60b2f | FAIL | ConcreteLiveAdapter still not runnable: `mutate()`/`sample()` raise unavailable, `evidence_from_run()` still calls `build_mock_evidence()`; forged adapter still yields live PASS; samples once per phase; no unload_ollama, no Compose renderer, no cleanup/rollback; regression set still missing the successful-path and response-derived-evidence proofs | implement the concrete boundary adapter with real orchestration + continuous sampler + rollback (all offline-testable) |
 
 **Suggested default when you're back:** authorize one more round for the four failed chains (tests-first, same bounded findings) — they are all close, with the reviewers' line-level findings as the spec. D2's synthetic-PASS class means accept-with-risk stays off the table.
@@ -28,8 +28,8 @@ All five FINAL round-3 compliance checks were executed against the exact committ
 ## 3. Stage 7.4 — in background flow (no Peter action needed)
 
 - Tester acceptance on deployed `ac8407e` → **TEST_FAIL BUG-7.4-DELETE-001** (stale note markers in timeline lane after delete).
-- Fix committed (bfe6a5f); review verdict: **product logic PASS, probe defects FAIL** (test-only).
-- Bounded probe-repair card `t_0a4340cb` running; then re-review → **Publisher deploy to live** → Tester re-run (all background).
+- Fix committed (bfe6a5f); first review: **product logic PASS, probe defects FAIL** (test-only).
+- Probe repair committed (3728b71, `STAGE_7_4_XSS_GATE_PASS` with real Chromium); re-review `t_39986431` running. On PASS → **Publisher deploy to live** → Tester re-run (all background).
 
 ## 4. Optional / infra
 - **Browserless test container** (devops container): running on Tower :3002, token-authed. Driver shim (append `?token=` to the CDP ws URL) still TBD before the Tester can use it; gateway chromium remains the active browser runtime. Low priority.
