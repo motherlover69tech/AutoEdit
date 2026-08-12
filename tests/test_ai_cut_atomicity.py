@@ -19,6 +19,7 @@ from sqlalchemy.pool import StaticPool
 
 from autoedit.ai.contracts import AIResultArtifact
 from autoedit.ai.activity_from_turns import ArtifactImportError, import_artifact
+import autoedit.api as api_module
 from autoedit.api import _confirmed_effective_turns, create_app
 from autoedit.db.migrate import run_migrations
 from autoedit.db.schema import angles, audio_channels, cuts
@@ -379,6 +380,82 @@ def test_confirmed_projection_rejects_duplicate_raw_or_authoritative_source():
         )
     with pytest.raises(ValueError, match="duplicate raw"):
         _confirmed_effective_turns(raw + raw, [], {"S0": {"speaker_id": "a"}})
+
+
+def _projection_publication_snapshot(engine, client, tmp_path: Path, pid: str) -> dict:
+    project_dir = tmp_path / pid
+    activity_path = project_dir / "audio" / "ai" / "v1" / "activity-whisperx.json"
+    with Session(engine) as session:
+        rows = session.execute(
+            cuts.select().where(cuts.c.project_id == pid).order_by(cuts.c.kind, cuts.c.name)
+        ).all()
+    return {
+        "candidate_cdls": sorted(path.name for path in (project_dir / "edit").glob("cdl_whisperx_*.json")),
+        "activity": activity_path.read_bytes() if activity_path.exists() else None,
+        "cuts": [(row._mapping["kind"], row._mapping["name"], row._mapping["cdl_json"]) for row in rows],
+        "selected": _selected_player_cut(client, pid),
+    }
+
+
+@pytest.mark.parametrize("duplicate_kind", ["raw", "authoritative"])
+def test_duplicate_projection_turn_rejected_without_publication(tmp_path: Path, duplicate_kind: str):
+    engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    _seed_prior_vad_cut(engine, tmp_path, pid)
+    before = _projection_publication_snapshot(engine, client, tmp_path, pid)
+    result_path = tmp_path / pid / "audio" / "ai" / "v1" / "result.json"
+    artifact = json.loads(result_path.read_text())
+    if duplicate_kind == "raw":
+        artifact["diarization_turns"].append(dict(artifact["diarization_turns"][0]))
+    else:
+        duplicate = dict(artifact["speaker_turns"][0])
+        duplicate["turn_id"] = "resolved-duplicate-source"
+        artifact["speaker_turns"].append(duplicate)
+    result_path.write_text(json.dumps(artifact))
+
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
+    assert response.status_code == 422, response.text
+    project_dir = tmp_path / pid
+    with Session(engine) as session:
+        rows = session.execute(
+            cuts.select().where(cuts.c.project_id == pid).order_by(cuts.c.kind, cuts.c.name)
+        ).all()
+    assert sorted(path.name for path in (project_dir / "edit").glob("cdl_whisperx_*.json")) == before["candidate_cdls"]
+    activity_path = project_dir / "audio" / "ai" / "v1" / "activity-whisperx.json"
+    assert (activity_path.read_bytes() if activity_path.exists() else None) == before["activity"]
+    assert [(row._mapping["kind"], row._mapping["name"], row._mapping["cdl_json"]) for row in rows] == before["cuts"]
+    assert before["selected"]["name"] == "Prior VAD"
+    assert before["selected"]["clips"] == [{"angle_id": "prior", "timeline_in_ms": 0, "src_in_ms": 0, "dur_ms": 5000}]
+
+
+def test_existing_artifact_projection_does_not_invoke_backends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("WHISPER_BACKEND", "mock")
+    monkeypatch.setenv("DIARIZE_BACKEND", "mock")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "")
+    monkeypatch.setenv("LLM_MODEL", "")
+
+    def _unexpected_backend(*args, **kwargs):
+        raise AssertionError("existing-artifact cut must not invoke an inference backend")
+
+    monkeypatch.setattr(api_module, "mock_transcribe", _unexpected_backend)
+    monkeypatch.setattr(api_module, "transcribe_with_backend", _unexpected_backend)
+    monkeypatch.setattr(api_module, "mock_diarize", _unexpected_backend)
+    _engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
+    assert response.status_code == 200, response.text
+
+
+def test_projected_activity_is_structure_equivalent_for_identical_fixtures(tmp_path: Path):
+    first_root, second_root = tmp_path / "first", tmp_path / "second"
+    first_engine, first_client, first_pid = _build_confirmed_ai_project(first_root)
+    second_engine, second_client, second_pid = _build_confirmed_ai_project(second_root)
+    first = first_client.post(f"/projects/{first_pid}/cut", json={"analysis_source": "whisperx"})
+    second = second_client.post(f"/projects/{second_pid}/cut", json={"analysis_source": "whisperx"})
+    assert first.status_code == second.status_code == 200
+    first_activity = json.loads((first_root / first_pid / "audio" / "ai" / "v1" / "activity-whisperx.json").read_text())
+    second_activity = json.loads((second_root / second_pid / "audio" / "ai" / "v1" / "activity-whisperx.json").read_text())
+    assert first_activity == second_activity
 
 
 def test_ai_cut_reports_missing_wide_condition(tmp_path: Path):
