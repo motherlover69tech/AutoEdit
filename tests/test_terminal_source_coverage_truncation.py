@@ -60,7 +60,11 @@ def test_terminal_confirmed_camera_and_wide_exhaustion_truncates_on_frame_bounda
             "version": 1,
             "clips": [
                 {"angle_id": by_role["cam_left"], "timeline_in_ms": 0, "src_in_ms": 0, "dur_ms": 652708},
-                {"angle_id": by_role["wide"], "timeline_in_ms": 652708, "src_in_ms": 652708, "dur_ms": 13459},
+                # The wide request genuinely spans the 666185-667208 silence.
+                # Its source exhausts at 666185, so repair must record that
+                # pre-boundary loss without letting the later covered
+                # interviewee clip extend the presenter/wide boundary.
+                {"angle_id": by_role["wide"], "timeline_in_ms": 652708, "src_in_ms": 652708, "dur_ms": 14500},
                 {"angle_id": by_role["cam_right"], "timeline_in_ms": 667208, "src_in_ms": 667208, "dur_ms": 875},
                 {"angle_id": by_role["cam_left"], "timeline_in_ms": 668083, "src_in_ms": 668083, "dur_ms": 3213},
             ],
