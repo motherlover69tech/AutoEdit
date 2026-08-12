@@ -3265,12 +3265,23 @@ def create_app(
                     # in the program.  An earlier speaker's camera may have a
                     # later source end and must never extend this boundary.
                     authorized_ids: set[str] = set()
-                    terminal_states = [
+                    terminal_state_candidates = [
                         item for item in timeline
                         if int(item.get("end_ms", 0)) > terminal_boundary
                         and int(item.get("start_ms", 0)) < expected_end
                         and len(item.get("active", [])) == 1
                     ]
+                    # Boundary authority comes from the active confirmed
+                    # presenter state at the artifact tail, not every solo
+                    # segment after the first uncovered instant.  A later
+                    # segment for another confirmed speaker is deliberately
+                    # omitted and must not extend the terminal boundary.
+                    terminal_states = []
+                    if terminal_state_candidates:
+                        terminal_states = [max(
+                            terminal_state_candidates,
+                            key=lambda item: (int(item.get("end_ms", 0)), int(item.get("start_ms", 0))),
+                        )]
                     for item in terminal_states:
                         camera_id = speaker_to_angle.get(str(item["active"][0]))
                         if camera_id:
