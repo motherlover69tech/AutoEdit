@@ -3256,12 +3256,25 @@ def create_app(
                         merged.append((start, end, [source_clip]))
                 terminal_start = merged[0][0] if merged else None
                 coverage_ends: list[int] = []
+                terminal_states: list[dict] = []
                 if terminal_start is not None:
-                    authorized_ids = {
-                        str(item.get("angle_id"))
-                        for item in repaired_clips
-                        if int(item.get("timeline_in_ms", 0)) < terminal_start
-                    }
+                    terminal_boundary = int(terminal_start)
+                    # The terminal boundary is authorized by the confirmed
+                    # presenter state immediately before the uncovered suffix,
+                    # not by every camera that happened to be repaired earlier
+                    # in the program.  An earlier speaker's camera may have a
+                    # later source end and must never extend this boundary.
+                    authorized_ids: set[str] = set()
+                    terminal_states = [
+                        item for item in timeline
+                        if int(item.get("end_ms", 0)) > terminal_boundary
+                        and int(item.get("start_ms", 0)) < expected_end
+                        and len(item.get("active", [])) == 1
+                    ]
+                    for item in terminal_states:
+                        camera_id = speaker_to_angle.get(str(item["active"][0]))
+                        if camera_id:
+                            authorized_ids.add(str(camera_id))
                     if wide_angle_id:
                         authorized_ids.add(wide_angle_id)
                     coverage_ends = [
@@ -3272,37 +3285,26 @@ def create_app(
                 boundary_instant = max(coverage_ends, default=0)
                 eligible = bool(merged and boundary_instant > 0)
                 if eligible:
-                    # Every uncovered item in the terminal suffix must be a
-                    # confirmed, single-speaker segment.  A safe-looking
-                    # confirmed segment must not authorize a suffix that also
-                    # contains unresolved, low-confidence, overlap, or
-                    # off-camera coverage loss.
+                    # The retained prefix may legitimately contain overlap,
+                    # unresolved, low-confidence, or off-camera states when it
+                    # is source-covered (wide is the safe fallback).  Only the
+                    # state authorizing the terminal suffix is relevant here.
                     unsafe_reasons = {
                         "unresolved",
                         "low_confidence",
                         "overlap",
                         "off_camera",
                     }
-                    if any(
-                        item.get(flag) or str(item.get("reason", "")).split(":", 1)[0] in unsafe_reasons
-                        for item in timeline
-                        if item.get("start_ms", 0) < _floor_frame_ms(boundary_instant)
-                        for flag in ("unresolved", "low_confidence", "overlap", "off_camera")
-                    ):
-                        eligible = False
-                    else:
-                        eligible = any(
-                            item.get("start_ms", 0) < merged[0][1]
-                            and item.get("end_ms", 0) > merged[0][0]
-                            and len(item.get("active", [])) == 1
-                            and not any(
-                                item.get(flag) or str(item.get("reason", "")).split(":", 1)[0] in unsafe_reasons
-                                for flag in ("unresolved", "low_confidence", "overlap", "off_camera")
-                            )
-                            and speaker_to_angle.get(item["active"][0])
-                            and wide_angle_id
-                            for item in timeline
+                    eligible = any(
+                        len(item.get("active", [])) == 1
+                        and not any(
+                            item.get(flag) or str(item.get("reason", "")).split(":", 1)[0] in unsafe_reasons
+                            for flag in ("unresolved", "low_confidence", "overlap", "off_camera")
                         )
+                        and speaker_to_angle.get(item["active"][0])
+                        and wide_angle_id
+                        for item in terminal_states
+                    )
                 if eligible and terminal_start is not None:
                     candidate_end = _floor_frame_ms(boundary_instant)
                     if candidate_end <= 0:
