@@ -1340,7 +1340,37 @@ def create_app(
             mapping_status = "confirmed"
         elif ai_player_artifact is not None:
             mapping_status = "needs_confirmation"
-        analysis_payload = {"source": analysis_source, "mapping_status": mapping_status}
+        # WhisperX candidate generation availability. Mirrors the /cut gates:
+        # artifact present, Gate 1 accepted for the current version, every
+        # observed speaker confirmed for that version, and a wide angle exists.
+        whisperx_available = False
+        if ai_player_artifact is not None:
+            current_version = artifact_version(ai_player_artifact)
+            gate_one_path = project_dir / "audio" / "ai" / "v1" / "word-timing-review.json"
+            gate_ok = False
+            try:
+                gate_one = json.loads(gate_one_path.read_text(encoding="utf-8"))
+                gate_ok = _valid_gate_one_acceptance(gate_one, current_version)
+            except (FileNotFoundError, OSError, json.JSONDecodeError):
+                gate_ok = False
+            if gate_ok:
+                with Session(app_engine) as session:
+                    confirmation_rows = session.execute(
+                        select(speaker_confirmations).where(
+                            speaker_confirmations.c.project_id == project_id,
+                            speaker_confirmations.c.source_artifact_version == current_version,
+                            speaker_confirmations.c.status == "confirmed",
+                        )
+                    ).all()
+                confirmed = {row._mapping["diarizer_speaker_id"] for row in confirmation_rows}
+                observed = {str(turn["diarizer_speaker_id"]) for turn in ai_player_artifact.get("diarization_turns", [])}
+                wide_ok = any(angle.role == "wide" for angle in angle_rows)
+                whisperx_available = bool(observed) and observed == confirmed and wide_ok
+        analysis_payload = {
+            "source": analysis_source,
+            "mapping_status": mapping_status,
+            "whisperx_available": whisperx_available,
+        }
         if analysis_version:
             analysis_payload["artifact_version"] = analysis_version
         # Projected activity is an additive, read-only view.  It is deliberately

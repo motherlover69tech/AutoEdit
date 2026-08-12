@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -10,10 +11,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from autoedit.ai.contracts import AIResultArtifact
 from autoedit.api import create_app
 from autoedit.db.migrate import run_migrations
-from autoedit.db.schema import angles, audio_channels, cuts
+from autoedit.db.schema import angles, audio_channels, cuts, speaker_confirmations
 from autoedit.projects import new_ulid
+
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 MISSING_PROJECT_ID = "01J00000000000000000000000"
@@ -333,3 +339,99 @@ def test_player_state_exposes_projected_activity_additively(app_context):
 
     assert body["projected_activity"] == activity
     assert body["cut"]["clips"] == seeded["cdl"]["clips"]
+
+
+def _seed_whisperx_gates(client, data_root, engine, seeded, *, confirm: bool = True) -> None:
+    """Write a valid AI artifact + Gate 1 acceptance (+ confirmations) for player-state."""
+    project_id = seeded["project_id"]
+    project_dir = data_root / project_id
+    audio_dir = project_dir / "audio"
+    (audio_dir / "source-a.wav").write_bytes(b"source-audio-a")
+    (audio_dir / "source-b.wav").write_bytes(b"source-audio-b")
+    (audio_dir / "ai").mkdir(parents=True, exist_ok=True)
+    (audio_dir / "ai" / "analysis.wav").write_bytes(b"analysis-audio")
+
+    artifact = AIResultArtifact.model_validate(
+        {
+            "schema_version": "1.0",
+            "run_id": "run-one",
+            "created_at": datetime.now(UTC),
+            "status": "completed",
+            "timeline_origin_ms": 0,
+            "timeline_end_ms": 5000,
+            "sources": [
+                {"source_id": "source-a", "relative_path": "audio/source-a.wav", "sha256": _sha(audio_dir / "source-a.wav"), "duration_ms": 5000, "sample_rate": 48000, "channels": 1, "sync_offset_ms": 0},
+                {"source_id": "source-b", "relative_path": "audio/source-b.wav", "sha256": _sha(audio_dir / "source-b.wav"), "duration_ms": 5000, "sample_rate": 48000, "channels": 1, "sync_offset_ms": 0},
+            ],
+            "analysis_audio": {"relative_path": "audio/ai/analysis.wav", "sha256": _sha(audio_dir / "ai" / "analysis.wav"), "strategy": "isolated_lav", "duration_ms": 5000, "sample_rate": 16000, "channels": 1},
+            "models": [{"task": "asr", "provider": "whisperx", "model_id": "large-v3", "version": "3.8.6", "compute_type": "float16"}],
+            "segments": [
+                {"segment_id": "seg-1", "start_ms": 0, "end_ms": 500, "text": "hello", "words": [{"text": "hello", "start_ms": 0, "end_ms": 200, "confidence": 0.98}]},
+            ],
+            "diarization_turns": [
+                {"turn_id": "t1", "diarizer_speaker_id": "SPEAKER_00", "start_ms": 0, "end_ms": 500, "confidence": 0.9},
+                {"turn_id": "t2", "diarizer_speaker_id": "SPEAKER_01", "start_ms": 2000, "end_ms": 2500, "confidence": 0.9},
+            ],
+            "speaker_mappings": [],
+            "speaker_turns": [],
+            "warnings": [],
+        }
+    )
+    (project_dir / "audio" / "ai" / "v1").mkdir(parents=True, exist_ok=True)
+    (project_dir / "audio" / "ai" / "v1" / "result.json").write_text(json.dumps(artifact.model_dump(mode="json")))
+    (project_dir / "audio" / "ai" / "v1" / "word-timing-review.json").write_text(
+        json.dumps({
+            "status": "PASS", "artifact_version": "run-one",
+            "words": [{"status": "PASS"}] * 3,
+            "boundaries": [{"status": "PASS"}] * 6,
+            "peter_acceptance": True,
+        })
+    )
+    if confirm:
+        with Session(engine) as session:
+            now = datetime.now(UTC)
+            for diar, speaker, angle in (
+                ("SPEAKER_00", "speaker-a", seeded["angle_a"]),
+                ("SPEAKER_01", "speaker-b", seeded["angle_b"]),
+            ):
+                session.execute(
+                    speaker_confirmations.insert().values(
+                        id=new_ulid(), project_id=project_id, diarizer_speaker_id=diar,
+                        speaker_id=speaker, camera_id=angle, status="confirmed",
+                        operator_id="operator", confirmed_at=now,
+                        source_run_id="run-one", source_artifact_version="run-one",
+                        evidence_turn_ids=["t1"],
+                    )
+                )
+            session.commit()
+
+
+def test_player_state_whisperx_unavailable_without_artifact(app_context):
+    client, data_root, engine = app_context
+    seeded = _seed_player_project(client, data_root, engine)
+
+    body = client.get(f"/projects/{seeded['project_id']}/player-state").json()
+
+    assert body["analysis"]["whisperx_available"] is False
+
+
+def test_player_state_whisperx_available_when_all_gates_pass(app_context):
+    client, data_root, engine = app_context
+    seeded = _seed_player_project(client, data_root, engine)
+    _seed_whisperx_gates(client, data_root, engine, seeded)
+
+    body = client.get(f"/projects/{seeded['project_id']}/player-state").json()
+
+    assert body["analysis"]["whisperx_available"] is True
+    assert body["analysis"]["source"] == "vad"
+    assert body["analysis"]["mapping_status"] == "needs_confirmation"
+
+
+def test_player_state_whisperx_unavailable_when_confirmations_missing(app_context):
+    client, data_root, engine = app_context
+    seeded = _seed_player_project(client, data_root, engine)
+    _seed_whisperx_gates(client, data_root, engine, seeded, confirm=False)
+
+    body = client.get(f"/projects/{seeded['project_id']}/player-state").json()
+
+    assert body["analysis"]["whisperx_available"] is False
