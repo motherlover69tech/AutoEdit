@@ -14,6 +14,7 @@ The system ingests three 1080p H.264 angles, syncs them by audio, creates smooth
 - Technical spec/build plan: `docs/source/multicam_autoedit_spec.md`
 - UI style guide/flow: `docs/source/multicam_ui_style_guide.html`
 - Job backlog: `jobs/BACKLOG.md`
+- **Highlighted live testing source of truth:** `docs/status/2026-08-12-d2-gate4-live-test-checklist.md` — update this single checklist after every live push/acceptance run; do not create parallel lists
 - Testing strategy: `docs/plans/TESTING_STRATEGY.md`
 - Player debugging skill: `~/.hermes/profiles/mastercoder/skills/autoedit-player-debugging/SKILL.md`
 
@@ -23,10 +24,12 @@ Read those before implementing.
 
 1. Run from `/workspace/AUTOEDIT`.
 2. Do **not** ask Peter to restate context; this file + `jobs/BACKLOG.md` + `docs/plans/TESTING_STRATEGY.md` are the handoff.
-3. **Immediate engineering pickup:** Phase 5 residuals (P5-A/B/C) and Phase 6 (speaker-mapping review UI, confirmed-turn projection fix, terminal source-coverage truncation) are SHIPPED and **live-verified by Peter (2026-08-12, "all confirmed working")**. Full stack integrated to `master` at `ac8407e` (remote == local) and deployed (api.py + web UI, image `sha256:0d6228f7`). Read `docs/status/2026-08-12-whisperx-live-session.md` (this session's status doc) and `docs/status/phase-6-terminal-truncation-release-2026-08-12.md` (the release handoff). The player-tail decision is RESOLVED (disregard tail; player stops at cut end), the WhisperX cut `01KZT3372CDNV7SBKK18STZR2Z` (handoff typo `...STZRZ2` corrected) is the SELECTED cut (v2), cut-review preview/save works (all 8 params, readable errors), and the remaining work is the four AI-GPU-1 application-acceptance gates per `docs/plans/ai-gpu-1-corrective-pickup.md`.
-4. Preserve `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock`; queued ASR/alignment/diarization ran successfully, but frame-level timing, confirmed speaker identity, and speaker-aware cut acceptance remain open.
-5. The unrelated Stage 7.4 gate is now narrower: the exact deployed candidate needs an independent Tester rerun for multi-author, XSS-safe rendering, marker seek, and delete-from-list-and-lane. A 2026-07-16 Tester run accidentally exercised `master` at `87b9d47`, not deployed `c096e4e`, so its delete-marker failure is not evidence about production.
-6. For the broader real-AI phase order, also read `docs/plans/whisperx-speaker-aware-ai-roadmap.md`.
+3. **Current snapshot (2026-08-12 21:59 UTC):** product Phase 5/6 and the 2026-08-12 live-session fixes are shipped/live-verified; the manual Kanban queue is active while both AUTOEDIT crons remain paused. The authoritative live board has two Designer reviews running (`t_714649ce` Package B correction `a863200`, `t_16fa5f9f` Package D1 correction `6afc3c5`), D2/A/C correction chains blocked at their documented review gates, and Stage 7.4 blocked on missing reviewer credentials + local Chromium. Read `jobs/BACKLOG.md` for the current card-by-card state.
+4. **SHIPPED + live-verified:** Phase 5 residuals (P5-A/B/C), Phase 6 (speaker-mapping review UI, confirmed-turn projection fix, terminal source-coverage truncation), player tail handling, `whisperx_available`, all 8 cut-regenerate params, and save-cut version/error handling. Full stack was deployed through `ac8407e` (image `sha256:0d6228f7`); Peter confirmed all working. Read `docs/status/2026-08-12-whisperx-live-session.md` and `docs/status/phase-6-terminal-truncation-release-2026-08-12.md`.
+5. **Highlighted live-testing source of truth — read and update this first:** `docs/status/2026-08-12-d2-gate4-live-test-checklist.md`. It is the required checklist for the anti-synthetic-PASS checks, GATE-1 frame timing, GATE-2 identity confirmation, GATE-3 speaker-turn cut review, GATE-4 V100/Ollama/Dots coexistence, post-push safety, evidence shape, and rollback. Any future live-test card, deployment handoff, or acceptance result must link to it, check items against the exact candidate, and update its status/evidence after the run; never create a parallel checklist.
+6. Production remains `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock`; live GATE-1..4 evidence is still open/deferred. The Tester route is now Peter-authorized `custom:9Router / cx/gpt-5.6-luna`, live-smoked as `TESTER_ROUTE_OK`.
+7. Stage 7.4 targets deployed `ac8407e` / image `sha256:0d6228f7`; the old `master`/`87b9d47` TEST_FAIL is not production evidence. The current Tester card reached the real task but is blocked because `/mnt/user/appdata/hermes/kanban/secrets/autoedit-test-account.json` is absent and local Chromium executables are unavailable.
+8. For the broader real-AI phase order, also read `docs/plans/whisperx-speaker-aware-ai-roadmap.md`.
 
 ## AI-GPU-1 corrective checkpoint (updated 2026-07-16)
 

@@ -1,6 +1,8 @@
-# D2 / GATE-4 — Live Push Test Checklist (2026-08-12)
+# 🔴 D2 / GATE-4 — LIVE PUSH TEST CHECKLIST / SINGLE SOURCE OF TRUTH
 
-**Status:** recorded while D2 round-3 rebuild is in flight (card `t_dccc9276`, Peter-authorized 2026-08-12).
+**Maintenance rule — READ THIS FIRST:** this is the one living checklist for every future AUTOEDIT live push, Tester acceptance, and AI-GPU-1 gate run. Do not create a parallel list in a card, handoff, or release note. Every related card must link here. After each run or deployment, update the exact candidate/image, checkbox state, evidence pointers, verdict, and residual blockers in this file before reporting completion.
+
+**Current status (2026-08-12 21:59 UTC):** checklist not yet executed against a live D2/GATE-4 run. D2/GATE-4 remains `NOT_RUN`; production remains `WHISPER_BACKEND=mock` / `DIARIZE_BACKEND=mock`. Tester route is `custom:9Router / cx/gpt-5.6-luna`, live-smoked as `TESTER_ROUTE_OK`. Stage 7.4 is blocked separately on the missing reviewer secret and local Chromium runtime.
 **Purpose:** what MUST be tested when the D2 live GATE-4 executor (and its worker image) is pushed to live / authorized for a GATE-4 window.
 **Source of truth:** `docs/plans/ai-gpu-1-acceptance-gates.md` (GATE-1..4 pass criteria, §11 commands, §12 packages) and the round-2 compliance finding (`t_4dbe5228`): *the executor must never synthesize acceptance — no `build_mock_evidence()` relabelled `live`; evidence must come from the real run.*
 **Production constraint:** `WHISPER_BACKEND=mock` / `DIARIZE_BACKEND=mock` until every gate below passes AND Peter separately approves the opt-in window. A live GATE-4 run is a **separate authorization** from pushing code.
