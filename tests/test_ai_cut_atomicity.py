@@ -19,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 
 from autoedit.ai.contracts import AIResultArtifact
 from autoedit.ai.activity_from_turns import ArtifactImportError, import_artifact
-from autoedit.api import create_app
+from autoedit.api import _confirmed_effective_turns, create_app
 from autoedit.db.migrate import run_migrations
 from autoedit.db.schema import angles, audio_channels, cuts
 from autoedit.projects import new_ulid
@@ -327,6 +327,58 @@ def test_confirmed_solo_projection_selects_mapped_close_camera(tmp_path: Path):
     # 500 ms is represented on the canonical frame grid (12 frames at 25 fps).
     assert clips[0]["dur_ms"] == 480
     assert clips[0]["reason_code"] == "speaking"
+
+
+def test_zero_speaker_turns_projects_current_confirmations(tmp_path: Path):
+    _engine, client, pid = _build_confirmed_ai_project(tmp_path)
+    result_path = tmp_path / pid / "audio" / "ai" / "v1" / "result.json"
+    artifact = json.loads(result_path.read_text())
+    artifact["speaker_turns"] = []
+    result_path.write_text(json.dumps(artifact))
+
+    response = client.post(f"/projects/{pid}/cut", json={"analysis_source": "whisperx"})
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["conditions"]["unresolved"] is False
+    assert result["clips"][0]["angle_id"] != "wide"
+    assert result["clips"][0]["mapping_status"] == "confirmed"
+    assert result["clips"][0]["projection"]["active"] == ["speaker-a"]
+
+
+def test_confirmed_projection_uses_current_identity_and_raw_order():
+    turns = _confirmed_effective_turns(
+        [
+            {"turn_id": "raw-2", "diarizer_speaker_id": "S0", "start_ms": 100, "end_ms": 300, "confidence": 0.7},
+            {"turn_id": "raw-1", "diarizer_speaker_id": "S1", "start_ms": 0, "end_ms": 100, "confidence": 0.8},
+        ],
+        [
+            {"source_turn_id": "raw-2", "diarizer_speaker_id": "S0", "speaker_id": "old", "start_ms": 100, "end_ms": 300, "confidence": 0.99, "provenance": "prior_confirmed_mapping"},
+        ],
+        {
+            "S0": {"speaker_id": "current", "camera_id": "cam-a"},
+            "S1": {"speaker_id": "other", "camera_id": "cam-b"},
+        },
+    )
+
+    assert [turn["speaker_id"] for turn in turns] == ["current", "other"]
+    assert [turn["provenance"] for turn in turns] == ["confirmed_mapping", "confirmed_mapping"]
+    assert turns[0]["confidence"] == 0.7
+
+
+def test_confirmed_projection_rejects_duplicate_raw_or_authoritative_source():
+    raw = [{"turn_id": "raw-1", "diarizer_speaker_id": "S0", "start_ms": 0, "end_ms": 100}]
+    with pytest.raises(ValueError, match="duplicate authoritative"):
+        _confirmed_effective_turns(
+            raw,
+            [
+                {"source_turn_id": "raw-1", "diarizer_speaker_id": "S0", "speaker_id": "a", "provenance": "confirmed_mapping", "start_ms": 0, "end_ms": 100},
+                {"source_turn_id": "raw-1", "diarizer_speaker_id": "S0", "speaker_id": "a", "provenance": "prior_confirmed_mapping", "start_ms": 0, "end_ms": 100},
+            ],
+            {"S0": {"speaker_id": "a"}},
+        )
+    with pytest.raises(ValueError, match="duplicate raw"):
+        _confirmed_effective_turns(raw + raw, [], {"S0": {"speaker_id": "a"}})
 
 
 def test_ai_cut_reports_missing_wide_condition(tmp_path: Path):

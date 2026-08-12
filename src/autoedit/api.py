@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 import logging
 import mimetypes
 from pathlib import Path
 from secrets import compare_digest
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import json
 import shutil
@@ -98,6 +98,50 @@ def _emit_cut_event(event: str, *, project_id: str, cut_id: str | None = None,
     }
     fields.update({key: value for key, value in optional.items() if value is not None})
     logging.getLogger("autoedit.cut_selection").info("cut_event %s", json.dumps(fields, sort_keys=True))
+
+
+def _confirmed_effective_turns(
+    raw_turns: Sequence[Mapping[str, Any]],
+    artifact_turns: Sequence[Mapping[str, Any]],
+    confirmations: Mapping[str, Any],
+) -> list[dict]:
+    """Project raw turns using only the current confirmation authority."""
+    authoritative_by_source: dict[str, Mapping[str, Any]] = {}
+    for turn in artifact_turns:
+        if turn.get("provenance") not in {"confirmed_mapping", "prior_confirmed_mapping"}:
+            continue
+        source_turn_id = str(turn["source_turn_id"])
+        if source_turn_id in authoritative_by_source:
+            raise ValueError("duplicate authoritative source turn")
+        authoritative_by_source[source_turn_id] = turn
+
+    effective: list[dict] = []
+    seen_raw_ids: set[str] = set()
+    for raw in raw_turns:
+        raw_id = str(raw["turn_id"])
+        if raw_id in seen_raw_ids:
+            raise ValueError("duplicate raw turn id")
+        seen_raw_ids.add(raw_id)
+        label = str(raw["diarizer_speaker_id"])
+        confirmation = confirmations.get(label)
+        timing = raw
+        source = authoritative_by_source.get(raw_id)
+        if (
+            source is not None
+            and confirmation is not None
+            and str(source.get("diarizer_speaker_id")) == label
+            and source.get("speaker_id") == confirmation["speaker_id"]
+        ):
+            timing = source
+        effective.append({
+            "start_ms": int(timing["start_ms"]),
+            "end_ms": int(timing["end_ms"]),
+            "speaker_id": confirmation["speaker_id"] if confirmation is not None else None,
+            "confidence": timing.get("confidence"),
+            "mapping_status": "confirmed" if confirmation is not None else "unresolved",
+            "provenance": "confirmed_mapping" if confirmation is not None else None,
+        })
+    return effective
 
 
 def _valid_gate_one_acceptance(record: object, current_version: str) -> bool:
@@ -2938,24 +2982,18 @@ def create_app(
                     detail="current speaker confirmations are required before generating the AI cut",
                 )
             speaker_to_angle = {item["speaker_id"]: item["camera_id"] for item in confirmations.values()}
-            resolved_ids = {str(turn["source_turn_id"]) for turn in ai_artifact.get("speaker_turns", [])
-                            if turn.get("provenance") in {"confirmed_mapping", "prior_confirmed_mapping"}}
-            turns = [
-                {"start_ms": int(turn["start_ms"]), "end_ms": int(turn["end_ms"]),
-                 "speaker_id": next((item["speaker_id"] for item in confirmations.values()
-                                      if item["diarizer_speaker_id"] == turn["diarizer_speaker_id"]), None),
-                 "confidence": turn.get("confidence"), "mapping_status": "confirmed",
-                 "provenance": turn.get("provenance")}
-                for turn in ai_artifact.get("speaker_turns", [])
-                if turn.get("provenance") in {"confirmed_mapping", "prior_confirmed_mapping"}
-            ]
-            turns.extend(
-                {"start_ms": int(turn["start_ms"]), "end_ms": int(turn["end_ms"]),
-                 "speaker_id": None, "confidence": turn.get("confidence")}
-                for turn in ai_artifact.get("diarization_turns", [])
-                if str(turn["turn_id"]) not in resolved_ids
-                and str(turn["diarizer_speaker_id"]) not in confirmations
-            )
+            try:
+                turns = _confirmed_effective_turns(
+                    ai_artifact.get("diarization_turns", []),
+                    ai_artifact.get("speaker_turns", []),
+                    confirmations,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                _emit_cut_event("candidate_failed", project_id=project_id,
+                                analysis_source=analysis_source, artifact_version_value=current_version,
+                                error_code="turn_projection_invalid",
+                                duration_ms=round((time.monotonic() - started_at) * 1000))
+                raise HTTPException(status_code=422, detail="invalid AI turn projection") from exc
             try:
                 timeline = activity_from_turns(turns, timeline_end_ms=int(ai_artifact["timeline_end_ms"]), confidence_threshold=0.5)
             except (KeyError, TypeError, ValueError) as exc:
