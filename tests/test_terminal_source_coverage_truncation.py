@@ -7,6 +7,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 import autoedit.api as api_module
+from autoedit.cdl_validator import frame_boundary_ms
 from autoedit.db.schema import angles, cuts, project_cut_selections, projects
 from tests.test_ai_cut_atomicity import _build_confirmed_ai_project, _seed_prior_vad_cut
 
@@ -29,6 +30,9 @@ def test_terminal_confirmed_camera_and_wide_exhaustion_truncates_on_frame_bounda
             update(angles).where(angles.c.id == by_role["wide"]).values(duration_ms=666185)
         )
         connection.execute(
+            update(angles).where(angles.c.id == by_role["cam_right"]).values(duration_ms=668083)
+        )
+        connection.execute(
             update(projects).where(projects.c.id == project_id).values(fps_num=24, fps_den=1)
         )
 
@@ -43,7 +47,10 @@ def test_terminal_confirmed_camera_and_wide_exhaustion_truncates_on_frame_bounda
         "activity_from_turns",
         lambda *args, **kwargs: [
             {"start_ms": 0, "end_ms": 652720, "active": ["speaker-a"]},
-            {"start_ms": 652720, "end_ms": 671296, "active": ["speaker-a"]},
+            {"start_ms": 652720, "end_ms": 666185, "active": ["speaker-a"]},
+            {"start_ms": 666185, "end_ms": 667208, "active": []},
+            {"start_ms": 667208, "end_ms": 668083, "active": ["speaker-b"]},
+            {"start_ms": 668083, "end_ms": 671292, "active": ["speaker-a"]},
         ],
     )
     monkeypatch.setattr(
@@ -53,7 +60,8 @@ def test_terminal_confirmed_camera_and_wide_exhaustion_truncates_on_frame_bounda
             "version": 1,
             "clips": [
                 {"angle_id": by_role["cam_left"], "timeline_in_ms": 0, "src_in_ms": 0, "dur_ms": 652708},
-                {"angle_id": by_role["wide"], "timeline_in_ms": 652708, "src_in_ms": 652708, "dur_ms": 18588},
+                {"angle_id": by_role["wide"], "timeline_in_ms": 652708, "src_in_ms": 652708, "dur_ms": 13459},
+                {"angle_id": by_role["cam_left"], "timeline_in_ms": 668083, "src_in_ms": 668083, "dur_ms": 3213},
             ],
         },
     )
@@ -93,6 +101,9 @@ def test_terminal_confirmed_camera_and_wide_exhaustion_truncates_on_frame_bounda
     for path, original in evidence_before.items():
         assert path.read_bytes() == original, path
     assert result["clips"][-1]["timeline_in_ms"] + result["clips"][-1]["dur_ms"] == 666167
+    assert result["clips"][-1]["timeline_in_ms"] == 652708
+    assert frame_boundary_ms(15988, 24, 1) == 666167
+    assert frame_boundary_ms(15989, 24, 1) == 666208
     assert all(
         clip["timeline_in_ms"] + clip["dur_ms"] <= 666167 for clip in result["clips"]
     )
