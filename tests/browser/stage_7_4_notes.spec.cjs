@@ -23,16 +23,25 @@ function makeServer() {
       project: { fps_num: 25, fps_den: 1 },
       quality_default: 'proxy',
       angles: [{ id: 'a', label: 'Camera A', color: '#fff' }],
-      cut: { clips: [{ angle_id: 'a', timeline_in_ms: 0, timeline_out_ms: 10000, src_in_ms: 0, reason: 'test' }] },
+      cut: { clips: [{ angle_id: 'a', timeline_in_ms: 0, dur_ms: 10000, src_in_ms: 0, reason: 'test' }] },
       audio: { program_url: '/empty-audio.m4a' },
     });
     if (url.pathname === `/projects/${PROJECT}/timeline-state`) return json(200, {
       total_duration_ms: 10000, clips: [], topics: [], notes: notes.slice(),
     });
+    if (url.pathname === `/projects/${PROJECT}/luts`) return json(200, { luts: [] });
     if (url.pathname === `/projects/${PROJECT}/notes` && req.method === 'GET') return json(200, { notes: notes.slice() });
     if (url.pathname === `/projects/${PROJECT}/notes/n1` && req.method === 'DELETE') {
       notes.splice(0, 1);
       return json(204, {});
+    }
+    if (url.pathname === '/empty-audio.m4a' || url.pathname === '/empty-audio.m4a/') {
+      res.writeHead(200, { 'Content-Type': 'audio/mp4' });
+      return res.end();
+    }
+    if (url.pathname === '/favicon.ico') {
+      res.writeHead(204);
+      return res.end();
     }
     if (url.pathname === '/web/player.js') {
       res.writeHead(200, { 'Content-Type': 'text/javascript' });
@@ -59,6 +68,9 @@ function makeServer() {
   const consoleErrors = [];
   page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
   page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
+  page.on('response', (response) => {
+    if (response.status() >= 400) consoleErrors.push(`HTTP ${response.status()} ${response.url()}`);
+  });
 
   try {
     await page.goto(`http://127.0.0.1:${port}/player/${PROJECT}`);
@@ -83,7 +95,7 @@ function makeServer() {
     assert.equal(await page.locator('.note-item').count(), 1, 'deleted note leaves list');
     assert.equal(await page.locator('.note-item').filter({ hasText: 'Reviewer Alpha' }).count(), 0, 'deleted note title leaves list');
     assert.equal(await page.locator('.note-marker').count(), 1, 'deleted note leaves timeline lane');
-    assert.equal(await page.locator('.note-marker').filter({ hasAttribute: 'data-t-ms', value: '1000' }).count(), 0, 'deleted note marker leaves timeline lane');
+    assert.equal(await page.locator('.note-marker[data-t-ms="1000"]').count(), 0, 'deleted note marker leaves timeline lane');
     assert.deepEqual(consoleErrors, [], `browser console errors: ${consoleErrors.join('; ')}`);
     console.log('STAGE_7_4_XSS_GATE_PASS');
   } finally {
