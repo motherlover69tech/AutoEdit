@@ -6,7 +6,7 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 ## Current next job
 
-**Current pipeline state — live snapshot 2026-08-12 21:59 UTC:** the manual Kanban queue is **ACTIVE**; both AUTOEDIT crons (`3d4dafa1eb69` watchdog and `690f012c01aa` dashboard) remain intentionally paused. The authoritative board has two Designer reviews running, seven offline correction/review cards blocked at documented handoffs, three superseded D2 cards blocked, and Stage 7.4 blocked only on its environment prerequisite. Do not infer state from the dashboard HTML.
+**Current pipeline state — live snapshot 2026-08-12 22:02 UTC:** the manual Kanban queue is **ACTIVE**; both AUTOEDIT crons (`3d4dafa1eb69` watchdog and `690f012c01aa` dashboard) remain intentionally paused. The authoritative board has two Designer reviews running, a D1 round-2 Programmer correction waiting in `todo` (`t_00d7935c`), eight offline/D2 correction handoffs blocked, and Stage 7.4 blocked only on its environment prerequisite. Do not infer state from the dashboard HTML.
 
 > **🔴 HIGHLIGHTED TESTING SOURCE OF TRUTH — KEEP THIS UPDATED:** `docs/status/2026-08-12-d2-gate4-live-test-checklist.md`
 >
