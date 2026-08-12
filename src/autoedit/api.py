@@ -3135,6 +3135,7 @@ def create_app(
             return None
 
         repaired_clips: list[dict] = []
+        uncovered_intervals: list[tuple[int, int, dict]] = []
         for clip in clips_list:
             t_in = int(clip["timeline_in_ms"])
             t_out = t_in + int(clip["dur_ms"])
@@ -3155,6 +3156,8 @@ def create_app(
                 )
                 if fallback is not None:
                     repaired_clips.append(fallback)
+                elif split_at > t_in:
+                    uncovered_intervals.append((t_in, split_at, clip))
                 if split_at < t_out:
                     resumed = _source_clip(clip["angle_id"], split_at, t_out, clip.get("reason", ""))
                     if resumed is not None and _clip_within_source(resumed):
@@ -3182,21 +3185,89 @@ def create_app(
                     )
                     if fallback is not None:
                         repaired_clips.append(fallback)
+                    else:
+                        uncovered_intervals.append((split_at, t_out, clip))
                 continue
             repaired_clips.append(clip)
         clips_list[:] = repaired_clips
 
-        # An AI-authoritative cut must cover the whole accepted master timeline.
-        # A missing/exhausted wide source is a visible failure, never a partial
-        # CDL or an arbitrary close-up fallback.
+        truncation = {
+            "applied": False,
+            "reason_code": None,
+            "original_artifact_end_ms": None,
+            "candidate_end_ms": None,
+            "omitted_tail_duration_ms": 0,
+        }
+        # An AI-authoritative cut normally covers the whole accepted master
+        # timeline.  The sole exception is one continuous terminal suffix in
+        # which a confirmed solo speaker's camera and wide are both exhausted.
+        # Never search another speaker camera: that would turn source loss into
+        # an unauthorized identity decision.
         if ai_artifact is not None:
             expected_end = int(ai_artifact["timeline_end_ms"])
             actual_end = (
                 clips_list[-1]["timeline_in_ms"] + clips_list[-1]["dur_ms"]
                 if clips_list else None
             )
-            if not clips_list or clips_list[0]["timeline_in_ms"] != 0 or actual_end != expected_end:
+            truncation.update({
+                "original_artifact_end_ms": expected_end,
+                "candidate_end_ms": expected_end,
+            })
+            if not clips_list or clips_list[0]["timeline_in_ms"] != 0:
                 raise HTTPException(status_code=422, detail="AI cut generation failed closed: no complete source-bound CDL")
+            if actual_end != expected_end:
+                uncovered_intervals.sort(key=lambda item: (item[0], item[1]))
+                merged: list[tuple[int, int, list[dict]]] = []
+                for start, end, source_clip in uncovered_intervals:
+                    if end <= start:
+                        continue
+                    if merged and start <= merged[-1][1]:
+                        merged[-1] = (merged[-1][0], max(merged[-1][1], end), merged[-1][2] + [source_clip])
+                    else:
+                        merged.append((start, end, [source_clip]))
+                terminal_start = merged[0][0] if merged else None
+                eligible = bool(merged and merged[-1][1] == expected_end and len(merged) == 1)
+                if eligible:
+                    # A terminal exception requires actual confirmed solo
+                    # speech, not merely silence or an unsafe-wide state.
+                    eligible = any(
+                        item.get("start_ms", 0) < merged[0][1]
+                        and item.get("end_ms", 0) > merged[0][0]
+                        and len(item.get("active", [])) == 1
+                        and not any(item.get(flag) for flag in ("unresolved", "low_confidence", "overlap", "off_camera"))
+                        and speaker_to_angle.get(item["active"][0])
+                        and wide_angle_id
+                        for item in timeline
+                    )
+                if eligible and terminal_start is not None:
+                    candidate_end = _floor_frame_ms(terminal_start)
+                    if candidate_end <= 0:
+                        eligible = False
+                    else:
+                        trimmed: list[dict] = []
+                        for clip in repaired_clips:
+                            clip_start = int(clip["timeline_in_ms"])
+                            clip_end = clip_start + int(clip["dur_ms"])
+                            if clip_start >= candidate_end:
+                                continue
+                            if clip_end > candidate_end:
+                                clip = dict(clip)
+                                clip["dur_ms"] = candidate_end - clip_start
+                            if clip["dur_ms"] > 0 and _clip_within_source(clip):
+                                trimmed.append(clip)
+                        repaired_clips = trimmed
+                        clips_list[:] = repaired_clips
+                        actual_end = (clips_list[-1]["timeline_in_ms"] + clips_list[-1]["dur_ms"] if clips_list else None)
+                        eligible = actual_end == candidate_end
+                        if eligible:
+                            truncation.update({
+                                "applied": True,
+                                "reason_code": "terminal_authorized_camera_coverage_exhausted",
+                                "candidate_end_ms": candidate_end,
+                                "omitted_tail_duration_ms": expected_end - candidate_end,
+                            })
+                if not eligible:
+                    raise HTTPException(status_code=422, detail="AI cut generation failed closed: no complete source-bound CDL")
 
         while clips_list:
             last = clips_list[-1]
@@ -3247,6 +3318,8 @@ def create_app(
         cdl["conditions"] = projection_conditions
         if ai_artifact is not None:
             cdl["analysis_artifact_version"] = artifact_version(ai_artifact)
+            cdl["truncation"] = truncation
+            activity["truncation"] = truncation
 
         # VAD and WhisperX candidates are immutable, versioned files.
         cut_id = new_ulid()
