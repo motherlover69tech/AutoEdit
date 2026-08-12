@@ -473,19 +473,26 @@ scp -q $SSH_OPTS "$TARBALL" "root@${TOWER_HOST}:${TARBALL_REMOTE}"
 
 echo "[deploy] Transferring and executing deploy script on Tower..."
 DEPLOY_OUTPUT=$(ssh_tower "$REMOTE_SCRIPT" 2>&1) || true
+REMOTE_RC=$?
 echo "$DEPLOY_OUTPUT"
 
 # Cleanup local temp files
 rm -f "$TARBALL" "$REMOTE_SCRIPT"
 
 # ── parse result ────────────────────────────────────────────────────────────
-# Extract the verdict from the remote output (first RESULT: line without =)
-RESULT_LINE=$(echo "$DEPLOY_OUTPUT" | grep '^RESULT:' | grep -v '=' | head -1 || true)
+# Extract the verdict from the remote output. The remote script emits
+# RESULT:mutation_started as an EARLY progress marker, then a terminal
+# RESULT line (deployed_and_verified, or deploy_failed/rollback_required/
+# dry_run_complete) plus RESULT:key=value metadata lines. The LAST bare
+# RESULT line (no '=') is the terminal verdict; taking the first one
+# misreports every successful deploy as DEPLOY_FAILED. Remote exit code
+# is retained alongside for adjudication (REMOTE_RC).
+RESULT_LINE=$(echo "$DEPLOY_OUTPUT" | grep '^RESULT:' | grep -v '=' | tail -1 || true)
 RESULT_VALUE="${RESULT_LINE#RESULT:}"
 
 # Also check exit code from ssh_tower
 echo ""
-echo "=== Deploy result: ${RESULT_VALUE:-unknown} ==="
+echo "=== Deploy result: ${RESULT_VALUE:-unknown} (remote rc=${REMOTE_RC:-?}) ==="
 
 case "$RESULT_VALUE" in
   deployed_and_verified*)
@@ -497,6 +504,7 @@ case "$RESULT_VALUE" in
     echo ""
     emit_json "DEPLOYED_AND_VERIFIED" "$SLUG" \
       "commit=${COMMIT}" \
+      "remote_rc=${REMOTE_RC:-?}" \
       "image=${NEW_IMAGE}" \
       "auth_status=${AUTH}" \
       "npm_status=${NPM}" \
@@ -509,6 +517,7 @@ case "$RESULT_VALUE" in
     echo ""
     emit_json "DRY_RUN_COMPLETE" "$SLUG" \
       "commit=${COMMIT}" \
+      "remote_rc=${REMOTE_RC:-?}" \
       "backup_dir=${BACKUP_DIR}" \
       "rollback_tag=${BACKUP_TAG}"
     exit 0
@@ -518,6 +527,7 @@ case "$RESULT_VALUE" in
     echo ""
     emit_json "DEPLOY_FAILED" "$SLUG" \
       "commit=${COMMIT}" \
+      "remote_rc=${REMOTE_RC:-?}" \
       "error=${RESULT_VALUE:-no_result_line}" \
       "stage=${STAGE}" \
       "backup_dir=${BACKUP_DIR}" \

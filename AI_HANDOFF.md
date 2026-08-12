@@ -23,7 +23,7 @@ Read those before implementing.
 
 1. Run from `/workspace/AUTOEDIT`.
 2. Do **not** ask Peter to restate context; this file + `jobs/BACKLOG.md` + `docs/plans/TESTING_STRATEGY.md` are the handoff.
-3. **Immediate engineering pickup:** continue Phase 4 speaker mapping/diarization from `docs/plans/ai-gpu-1-corrective-pickup.md` and the authoritative roadmap. The artifact corrective review is now `PASS`.
+3. **Immediate engineering pickup:** Phase 5 residuals (P5-A/B/C) and Phase 6 (speaker-mapping review UI, confirmed-turn projection fix, terminal source-coverage truncation) are SHIPPED and integrated to `master` at `7b0d27f`; the api.py-only deployment is live and verified. Read `docs/status/phase-6-terminal-truncation-release-2026-08-12.md` (the release handoff) before touching anything: next steps there are (1) deploy the Phase 6 web UI files (currently merged but not live), (2) resolve the open product question on player treatment when a candidate cut is shorter than program audio, (3) resume the four AI-GPU-1 application-acceptance gates per `docs/plans/ai-gpu-1-corrective-pickup.md`.
 4. Preserve `WHISPER_BACKEND=mock` and `DIARIZE_BACKEND=mock`; queued ASR/alignment/diarization ran successfully, but frame-level timing, confirmed speaker identity, and speaker-aware cut acceptance remain open.
 5. The unrelated Stage 7.4 gate is now narrower: the exact deployed candidate needs an independent Tester rerun for multi-author, XSS-safe rendering, marker seek, and delete-from-list-and-lane. A 2026-07-16 Tester run accidentally exercised `master` at `87b9d47`, not deployed `c096e4e`, so its delete-marker failure is not evidence about production.
 6. For the broader real-AI phase order, also read `docs/plans/whisperx-speaker-aware-ai-roadmap.md`.
@@ -86,6 +86,8 @@ Substantial local speaker-aware AI work now exists. The corrective review passed
 | 8 — Export | 8.1–8.2 | ✅ Validator + FCPXML verified in Resolve |
 | 8.3 — OTIO fallback | 8.3 | 🔄 Direct CMX3600 EDL exists and was Resolve-verified; spec's OTIO fallback is not implemented |
 | 9 — Generative features | 9.1–9.2 | 🔄 Deterministic NL intent baseline done; title output is template-based, not the specified LLM/regeneration flow |
+| AI-GPU-1 Phase 5 | P5-A/B/C | ✅ Resolved-turn→activity bridge, explicit vad/whisperx generation + durable selected-cut backend, review-player A/B preview/save UI (integrated `7b0d27f`) |
+| AI-GPU-1 Phase 6 | Phase 6 | ✅ Speaker-mapping review UI, confirmed-turn projection fix, terminal source-coverage truncation — api.py deployed live (image `8133558f`); web UI merged, not yet deployed |
 
 ### Player.js bugs fixed (2026-06-09 session)
 
