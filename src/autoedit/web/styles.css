@@ -271,6 +271,10 @@ textarea:focus { outline: none; border-color: var(--red); }
 .note-marker { position: absolute; top: -3px; width: 2px; height: 28px; background: var(--wide); cursor: pointer; pointer-events: auto; }
 .note-marker[data-kind='cut_suggestion'] { width: 3px; background: var(--red); }
 
+/* Keep the established desktop geometry; constrain and wrap only the narrow
+   header so every transport control remains reachable. */
+.sync-nudge { display: flex; align-items: center; gap: 6px; }
+
 /* ── LUT Panel ──────────────────────────────────────────── */
 .lut-panel { padding: 18px var(--pad, 20px); }
 .lut-section { margin-bottom: 24px; }
@@ -302,8 +306,25 @@ textarea:focus { outline: none; border-color: var(--red); }
 /* ── Responsive ────────────────────────────────────────── */
 @media (max-width: 900px) {
   .g2, .g3, .g4, .upload-grid { grid-template-columns: 1fr; }
-  .topbar, .player-header { position: static; align-items: flex-start; flex-direction: column; }
+  .topbar, .player-header { position: static; align-items: stretch; flex-direction: column; }
+  .player-header { width: 100%; min-width: 0; box-sizing: border-box; }
+  .player-header > div { width: 100%; }
+  .player-header > * { max-width: 100%; box-sizing: border-box; }
+  .player-header > .player-controls { flex: 0 0 100%; width: 100%; min-width: 0; }
+  .player-header .player-controls { align-self: stretch; max-width: 100%; min-width: 0; flex: 1 1 100%; box-sizing: border-box; flex-wrap: wrap; gap: 12px 16px; }
+  .player-controls > * { min-width: 0; }
+  .player-controls .sync-nudge { flex: 1 1 100%; flex-wrap: wrap; }
   .flow .arrow { transform: rotate(90deg); padding: 6px 0; }
   .flow .step { min-width: 100%; }
   .timeline-lane .lane-label { width: 64px; }
+}
+
+@media (max-width: 640px) {
+  .player-header { overflow: hidden; padding-inline: var(--pad); }
+  .player-controls { align-self: stretch; box-sizing: border-box; gap: 10px; }
+  .player-controls .current-angle { flex: 1 1 auto; }
+  .player-controls label[for], .player-controls > label { width: auto !important; }
+  .sync-nudge { width: 100%; max-width: 100%; min-width: 0; flex: 0 1 100%; box-sizing: border-box; }
+  .sync-nudge > * { min-width: 0; }
+  .sync-nudge .mono-note { min-width: 0 !important; }
 }

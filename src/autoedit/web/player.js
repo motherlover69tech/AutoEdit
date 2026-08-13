@@ -984,10 +984,7 @@ export async function bootPlayer(doc = document, locationObj = window.location) 
     if (tlRes.ok) {
       timelineState = await tlRes.json();
       renderTimeline(elements, timelineState, clips, angleById);
-      // Render notes from timeline state
-      if (timelineState.notes) {
-        renderNotes(elements, timelineState, clips);
-      }
+      if (timelineState.notes) renderNotes(elements, timelineState, clips);
     }
   } catch (_err) {
     // Timeline is optional; player still works without it.
@@ -1493,6 +1490,8 @@ function renderNoteList(elements, notes) {
           { method: "DELETE", credentials: "same-origin" });
         if (res.ok) {
           loadNotesList(elements, elements.audio.dataset.projectId);
+          const timelineRes = await fetch(`/projects/${elements.audio.dataset.projectId}/timeline-state`, { credentials: "same-origin" });
+          if (timelineRes.ok) renderNotes(elements, await timelineRes.json(), []);
         }
       } catch (_err) { /* ignore */ }
     });
