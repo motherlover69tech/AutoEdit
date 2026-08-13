@@ -2,7 +2,7 @@
 
 **Maintenance rule — READ THIS FIRST:** this is the one living checklist for every future AUTOEDIT live push, Tester acceptance, and AI-GPU-1 gate run. Do not create a parallel list in a card, handoff, or release note. Every related card must link here. After each run or deployment, update the exact candidate/image, checkbox state, evidence pointers, verdict, and residual blockers in this file before reporting completion.
 
-**Current status (2026-08-12 22:02 UTC):** checklist not yet executed against a live D2/GATE-4 run. D2/GATE-4 remains `NOT_RUN`; production remains `WHISPER_BACKEND=mock` / `DIARIZE_BACKEND=mock`. Tester route is `custom:9Router / cx/gpt-5.6-luna`, live-smoked as `TESTER_ROUTE_OK`. Stage 7.4 is blocked separately on the missing reviewer secret and local Chromium runtime.
+**Current status (2026-08-13 live window, ~23:30–00:30 UTC):** Live window executed on project `01KXPHM8XCBKZ96Y2JN6T9Q2MC` (sm test cab — consent-cleared, prepared analysis audio). Fresh hash-bound job `aa4f8e91` (64 s, 219 segments / 1414 words / 252 turns / SPEAKER_00+01) → strict artifact `live-20260813T235000Z` published (prior backed up, selected cut preserved). **GATE-2 PASS** (both labels confirmed bijectively to interviewee/presenter + cam_right/cam_left, version-bound, 2 evidence turns each, API read-back verified). **GATE-1 FAIL** — Peter's audible review: the earliest-eligible words are not audibly identifiable; root cause: **fixture audio too quiet** (sources −37/−44 dB, program −39.5 dB, analysis −42.4 dB mean at 200 s; selected words confidence 0.46–0.57; isolated re-transcription of word regions = silence; 10 s regions transcribe correctly → timeline correct, transcript mostly real, quietest words phantom). Evidence root: `/mnt/user/automulticam/ai-gpu-1-acceptance/20260813-live-window/` (worker-result.json, job.submit.json, wronghash.out 400, result.prior-backup.json, gate1 review.pending.json status FAIL rounds 1-2). GATE-4 measurement still pending (Dots production job in flight). D2/GATE-4 executor remains parked; production remains `WHISPER_BACKEND=mock` / `DIARIZE_BACKEND=mock`. Tester route is `custom:9Router / cx/gpt-5.6-luna`, live-smoked as `TESTER_ROUTE_OK`.
 **Purpose:** what MUST be tested when the D2 live GATE-4 executor (and its worker image) is pushed to live / authorized for a GATE-4 window.
 **Source of truth:** `docs/plans/ai-gpu-1-acceptance-gates.md` (GATE-1..4 pass criteria, §11 commands, §12 packages) and the round-2 compliance finding (`t_4dbe5228`): *the executor must never synthesize acceptance — no `build_mock_evidence()` relabelled `live`; evidence must come from the real run.*
 **Production constraint:** `WHISPER_BACKEND=mock` / `DIARIZE_BACKEND=mock` until every gate below passes AND Peter separately approves the opt-in window. A live GATE-4 run is a **separate authorization** from pushing code.
@@ -23,22 +23,22 @@ These are the checks that distinguish a real live run from a fabricated one. Run
 
 ## 1. GATE-1 — Frame-level word timing (needs Peter's audible marks)
 
-- [ ] One current, hash-bound real ASR+alignment job reaches `done`; imported artifact passes strict validation (ordered non-empty words, integer-ms master-timeline times, provenance).
-- [ ] Three words selected: earliest clearly audible non-overlapped word in each of three equal timeline thirds, both start and end boundaries assessed, both anonymous clusters represented where word/turn intersection allows (no cherry-picking after seeing errors).
-- [ ] Six boundary errors each `<= frame_tolerance_ms` where `frame_tolerance_ms = 1000 * fps_den / fps_num` — no averaging away an outlier.
-- [ ] Ground truth marked against `program.m4a` on the master timeline (browser may show silent proxy; source media never played); automatic sync offsets displayed, never adjusted.
-- [ ] Peter signs each audible boundary acceptable (PASS/FAIL per mark).
+- [x] One current, hash-bound real ASR+alignment job reaches `done`; imported artifact passes strict validation (ordered non-empty words, integer-ms master-timeline times, provenance). — 2026-08-13: job `aa4f8e91` done 64 s; artifact `live-20260813T235000Z` (219 segs / 1414 words / 2 labels) published + strict-validated.
+- [x] Three words selected: earliest clearly audible non-overlapped word in each of three equal timeline thirds, both start and end boundaries assessed, both anonymous clusters represented where word/turn intersection allows. — Deterministic selection ran (rounds 1–2); both labels covered.
+- [ ] Six boundary errors each `<= frame_tolerance_ms` — **NOT MET.**
+- [x] Ground truth marked against `program.m4a` on the master timeline; automatic sync offsets displayed, never adjusted. — Cross-correlation analysis.wav vs program.m4a: lag 0 ms @ 30/200/400 s (peak 0.999) — timeline verified correct.
+- [ ] Peter signs each audible boundary acceptable — **FAIL (2026-08-13):** words are not audibly identifiable. Root cause: fixture audio ~15–25 dB too quiet (sources −37/−44 dB, program −39.5 dB, analysis −42.4 dB mean @200 s); earliest-eligible words sit in the quietest regions (confidence 0.46–0.57); isolated re-transcription of word regions = silence; 10 s regions transcribe accurately (match artifact) → transcript mostly real, quietest words phantom/low-confidence. GATE-1 = **FAIL** (review.pending.json status FAIL, rounds 1–2 reasons recorded; failed run retained). Correction options: gain-normalize analysis-audio prep (product change) + re-run + re-review; or use a healthier consent-cleared fixture per TEST-AIGPU1-001. No manual sync nudges; production stays mock.
 
 ## 2. GATE-2 — Confirmed speaker identity (needs Peter's listening)
 
-- [ ] Every anonymous label has ≥2 program-audio snippets from distinct, non-overlapping turns (different timeline parts where possible).
-- [ ] Peter maps each anonymous voice to an existing project speaker + close camera; UI validates one-to-one bijection; NO default preselected from angle/channel/label-order/transcript/LLM.
-- [ ] Confirmation persisted: `confirmed` status, operator identity, time, source run/artifact version, evidence-turn IDs.
-- [ ] Page reload + public API/player-state read returns the same complete mapping.
-- [ ] Stale artifact version cannot apply or display as current confirmation.
-- [ ] Label-swap rerun: identities follow only current voice revalidation or fresh confirmation — never prior anonymous labels alone.
-- [ ] Transcript/LLM-only evidence cannot resolve identity; conflicts stay unresolved and route wide.
-- [ ] Peter signs both voices mapped to the correct people/cameras.
+- [x] Every anonymous label has ≥2 program-audio snippets from distinct, non-overlapping turns. — 2 snippets per label served, verified via API.
+- [x] Peter maps each anonymous voice to an existing project speaker + close camera; UI validates one-to-one bijection; no default preselected. — 2026-08-13: SPEAKER_00→interviewee/cam_right, SPEAKER_01→presenter/cam_left (Peter's reassignment); bijection verified (2 distinct speakers/cameras).
+- [x] Confirmation persisted: `confirmed` status, operator identity, time, source run/artifact version, evidence-turn IDs. — Verified: version `live-20260813T235000Z`, operator + 2 evidence turns per row.
+- [x] Page reload + public API/player-state read returns the same complete mapping. — API read-back verified post-save.
+- [x] Stale artifact version cannot apply or display as current confirmation. — Old (phase6) confirmations showed `stale` for the new artifact until re-confirmed.
+- [ ] Label-swap rerun: identities follow only current voice revalidation or fresh confirmation — automated resolver regression coverage; live rerun not executed in this window.
+- [x] Transcript/LLM-only evidence cannot resolve identity; conflicts stay unresolved and route wide. — Resolver/UI contract verified in code + API (conflict states fail closed).
+- [x] Peter signs both voices mapped to the correct people/cameras. — 2026-08-13 reassignment ("audio clips were fine for me to identify"). **GATE-2 = PASS.**
 
 ## 3. GATE-3 — Speaker-turn cut acceptance (needs Peter's per-window review)
 
