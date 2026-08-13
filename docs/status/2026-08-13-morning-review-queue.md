@@ -1,6 +1,13 @@
 # AUTOEDIT — Morning review queue (2026-08-13)
 
-Night-shift outcomes (2026-08-12 22:25 → 2026-08-13): queue driven autonomously; every card that could move did. This file is the consolidated list of **what needs Peter** and **what was logged for live testing**. Nothing below blocks the pipeline; all items are decisions or live-window tests for when you're back.
+Night-shift outcomes (2026-08-12 22:25 → 2026-08-13 01:05): queue driven autonomously; every card that could move did. This file is the consolidated list of **what needs Peter** and **what was logged for live testing**. Nothing below blocks the pipeline; all items are decisions or live-window tests for when you're back.
+
+## ⚡ Pickup checklist (first 10 minutes of the next session)
+1. **Tester re-acceptance `t_27b64937` is RUNNING** on the new live image (Stage 7.4, delete-marker fix deployed 69f5486d). Watch it to a verdict; on TEST_PASS merge `wt/fix-7.4-delete-marker` → master and close Stage 7.4; on TEST_FAIL create a bounded bug card.
+2. **Six acceptance chains await Peter's round decision** (table below). Suggested default: authorize one more round for all six — reviewers' line-level findings are the spec; D1's reviewer named the 16 remaining accepted forged mutations to encode as tests. D2's synthetic-PASS class → accept-with-risk stays off the table.
+3. **Dispatcher lesson (do not repeat):** never re-queue a completed kanban card under its old idempotency key — the dispatcher won't claim it (stuck-spawn warnings). Clear terminal fields or create a fresh card; if the dispatcher wedges, restart it with `docker exec hermes-gateway /command/s6-svc -r /run/service/gateway-coordinator`.
+4. **Browserless test container** (devops box): running on Tower :3002 (token in ops-stack/browserless/compose.yaml). Driver shim (append `?token=` to the CDP ws URL) still TBD before the Tester can use it; gateway chromium remains the active runtime. Optional.
+5. Crons stay paused (Peter drives the queue via check-ins); verify pause state on the GATEWAY copy of jobs.json before trusting it.
 
 ## 1. Compliance decision queue (FINAL checks all FAILED — no further loop without you)
 
