@@ -10,20 +10,20 @@ Night-shift outcomes (2026-08-12 22:25 → 2026-08-13 01:05): queue driven auton
 4. **Browserless test container** (devops box): running on Tower :3002 (token in ops-stack/browserless/compose.yaml). Driver shim (append `?token=` to the CDP ws URL) still TBD before the Tester can use it; gateway chromium remains the active runtime. Optional.
 5. Crons stay paused (Peter drives the queue via check-ins); verify pause state on the GATEWAY copy of jobs.json before trusting it.
 
-## 1. Compliance decision queue — **ALL SIX AUTHORIZED (Peter, 2026-08-13 ~01:55 UTC)** ✅
+## 1. Compliance decision queue — **ALL SIX CHAINS PARKED (FINAL round-4 verdicts: DESIGN_COMPLIANCE_FAIL, 2026-08-13 02:00–02:26 UTC)** ⛔
 
-All five FINAL round-3 compliance checks FAILED with line-level findings (table below). **Peter authorized one more round for ALL six chains: "Create the cards and run them. If they can't be passed document it and move on."** The six next-round cards are RUNNING (created 01:58 UTC, all claimed with live PIDs):
+Peter authorized one final round for all six ("Create the cards and run them. If they can't be passed document it and move on"). All six round-4 implementations were executed against the exact findings and ALL SIX final checks returned **DESIGN_COMPLIANCE_FAIL** — per the authorization, **each chain is now DOCUMENTED and PARKED; no further loop.** The full numbered verdicts live in the check-card comments (below); candidates remain committed in their worktrees as the audit trail.
 
-| Chain | Round-4 card | Worktree (builds on) | Final check that failed |
-|---|---|---|---|
-| **A** | `t_f850829c` | `.worktrees/t_5477b373` (cf915d9) | t_745ed2cc |
-| **A Gate-1** | `t_0f4a83d4` | `.worktrees/t_3cc93a59` (444f4fc+3b00689) | t_1cda8d9b |
-| **B** | `t_603fa02b` | `.worktrees/t_9b653567` (38e964e) | t_2c9e2be6 |
-| **C** | `t_68ccc838` | `.worktrees/t_08478be9` (330e67e) | t_0abbb32c |
-| **D1** | `t_9db0d442` | `.worktrees/t_00d7935c` (5bf56a6+57163b4) | t_a380c78d |
-| **D2** | `t_dc040f53` | `.worktrees/t_4b8ecc0a` (e1b6e93+1b60b2f) | t_e629e9bf |
+| Chain | Round-4 impl card | Final check card | Verdict | One-line reason (from the check) |
+|---|---|---|---|---|
+| **A** | t_f850829c (12c7ec0c) | t_e7dc0820 | **FAIL** | Five mandatory direct regressions absent (only 1 nominal test); probe is implementation-independent (raises before build_run_evidence); hand-authored PASS still forgeable (model_validate accepted rewritten status/results/gates); artifact_valid still tautological + derive_gate_statuses outputs overwritten |
+| **A Gate-1** | t_0f4a83d4 (47f1636+d0c5411) | t_ddb46861 | **FAIL** | `_FIXTURE_SET_VALIDATION_TOKEN` is an importable module singleton — leading underscore is not an access boundary; tests themselves import it and mint accepted instances; independent replay still reproduced FORGED_TYPED_SET_ACCEPTED PASS. Trusted-host selected-run separation also not implemented. (Artifact path/run/bytes identity hardening PASSED.) |
+| **B** | t_603fa02b (bb315e5+0da3212) | t_b0e2fe1a | **FAIL** | Swap is destructive (two-row swap ends with one row); current-voice evidence below the resolver's minimum-two rule so conflicts never derive (Bob contradiction stayed `confirmed`); silent proxy video URLs fabricated → HTTP 400 from media API; UI bijection incomplete (one blank can save alone; two-way swap blocked). UI-AIGPU1-005 (status live region) PASSED. |
+| **C** | t_68ccc838 (a7305c8) | t_b672a111 | **FAIL** | Preservation assertions themselves are correct (both findings closed functionally) but the mandatory parent-RED gate is not met: the strengthened probes pass 34/34 against pre-fix 330e67e — no RED evidence |
+| **D1** | t_9db0d442 (3076209+70e85d2) | t_da25a2f0 | **FAIL** | 28-mutation replay: **20 rejected / 28, 8 accepted-invalid**; all ten findings remain open (discovery forgeable, no RenderOnlyComposeAdapter, tick spacing fail-open, workload interval forgeable, empty process evidence passes, health/incident disconnected, drift/rollback unreconciled, JSON-pointer unenforced, deep scan absent, committed set not the mandated 28). **Reviewer: "Package D1 remains unsuitable as the semantic trust boundary for D2/live acceptance."** |
+| **D2** | t_dc040f53 (78c16e1) | t_bb116b80 | **FAIL** | CRITICAL: caller-forged live PASS still possible (execute() accepts any injected adapter; forged evidence yielded {'verdict':'PASS','mode':'live',...}); ConcreteLiveAdapter not a concrete CLI-runnable boundary (CLI --execute unavailable; wraps caller callables; forces ineligible failure) |
 
-Card bodies carry the EXACT numbered findings from each final check (full text embedded; workers cannot read other cards' comments). Each round is tests-first, bounded, one final compliance check after. **Exit rule (Peter's instruction): if a chain's final check fails again, DOCUMENT it (this file + BACKLOG) and PARK it — no further loop.** On PASS: A/A-Gate1/D1/D2 close as offline tooling; B and C go through Publisher deploy after their final check passes.
+**Consequences (documented, standing):** GATE-4 stays `NOT_RUN`. D1 cannot serve as the evidence trust boundary for D2. Production remains `WHISPER_BACKEND=mock` / `DIARIZE_BACKEND=mock` — none of these chains gate live deployment since none passed. Any future resurrection of a chain requires a NEW explicit Peter decision with a different approach (the findings are the spec); the two-round cap + this final authorization are exhausted.
 
 | Chain | Candidate | Verdict | Gap in one line | Next round would need |
 |---|---|---|---|---|
