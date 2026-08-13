@@ -306,7 +306,7 @@ textarea:focus { outline: none; border-color: var(--red); }
 
 /* ── Responsive ────────────────────────────────────────── */
 @media (min-width: 901px) and (max-width: 1100px) {
-  .player-controls { width: 844.08px; min-height: 56px; flex-basis: 844.08px; }
+  .player-header > .player-controls { width: 844.08px; min-height: 56px; flex-basis: 844.08px; }
 }
 
 @media (max-width: 900px) {
