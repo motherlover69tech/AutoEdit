@@ -2,6 +2,10 @@
 
 Night-shift outcomes (2026-08-12 22:25 → 2026-08-13 01:05): queue driven autonomously; every card that could move did. This file is the consolidated list of **what needs Peter** and **what was logged for live testing**. Nothing below blocks the pipeline; all items are decisions or live-window tests for when you're back.
 
+## ⚡ ROUND-6 (2026-08-13 23:00 UTC) — four chains re-opened, D2 held
+
+Peter authorized round-6 on 2026-08-13 ("Go round-6") for the four close chains; D2 remains parked (multi-day commitment pending a separate decision). Round-6 cards created 22:55 UTC, staggered priorities (100/98/96/94), trust-boundary rule applied (validator-produced instances, instance-bound secrets, reviewer replays committed as tests), RED runs recorded against the exact round-5 parent before implementing: **A** `t_4b4e8782` (wt/t_5477b373, on 2aa9df4) · **A-Gate1** `t_8487b016` (wt/t_3cc93a59, on f257f7f) · **B** `t_a9049ea5` (wt/t_9b653567, on 8ecad13) · **D1** `t_e8b3accb` (wt/t_00d7935c, on 5b31c21). All four claimed with live PIDs 23:00 UTC. One final compliance check per chain after READY_FOR_REVIEW; failure → parked, no further loop.
+
 ## ⚡ ROUND-5 OUTCOMES (2026-08-13 22:32 UTC) — C CLOSED ✅, A/A-Gate1/B/D1/D2 PARKED ⛔
 
 All six round-5 implementations ran; six final Designer checks dispatched 22:12 UTC, verdicts by 22:32 UTC. Full record: `docs/status/2026-08-13-round5-final-outcomes.md`.
