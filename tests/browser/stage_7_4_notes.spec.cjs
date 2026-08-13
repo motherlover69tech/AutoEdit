@@ -116,7 +116,7 @@ function makeServer() {
         assert.equal(geometry.wrap, 'nowrap', `wide controls wrap at ${width}px`);
         assert.equal(geometry.syncWrap, 'nowrap', `wide sync controls wrap at ${width}px`);
         if (width === 1024) {
-          assert.ok(Math.abs(geometry.width - 725.4375) < 0.5, `player-controls geometry changed at 1024px: ${JSON.stringify(geometry)}`);
+          assert.ok(Math.abs(geometry.width - 844.08) < 0.5, `player-controls geometry changed at 1024px: ${JSON.stringify(geometry)}`);
           assert.ok(Math.abs(geometry.height - 56) < 0.5, `player-controls height changed at 1024px: ${JSON.stringify(geometry)}`);
           assert.ok(Math.abs(geometry.syncWidth - 388.48) < 0.5, `sync-nudge geometry changed at 1024px: ${JSON.stringify(geometry)}`);
           assert.ok(Math.abs(geometry.syncHeight - 40) < 0.5, `sync-nudge height changed at 1024px: ${JSON.stringify(geometry)}`);

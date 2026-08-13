@@ -51,6 +51,7 @@ ul { list-style: none; }
 .brandmark { font-family: var(--serif); font-size: 24px; letter-spacing: -.01em; white-space: nowrap; }
 .brandmark .dot { color: var(--red); }
 .topbar nav, .player-controls { display: flex; gap: 26px; font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; align-items: center; }
+.player-controls { width: 844.08px; min-height: 56px; flex: 0 0 844.08px; }
 .topbar nav a { color: var(--t-low); transition: color .2s; }
 .topbar nav a:hover, .topbar nav a.is-active { color: var(--t-hi); }
 .topbar nav button { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; background: transparent; border: 0; color: var(--t-low); cursor: pointer; }
