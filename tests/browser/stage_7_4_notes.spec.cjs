@@ -89,6 +89,7 @@ function makeServer() {
         '#lutFile', '#defaultLutSelect', '#activateDefaultLut', '#deactivateDefaultLut',
         '.cut-params-panel', '#cutPresetSteady', '#cutPresetDirect', '#cutPresetLooser',
         '#regenerateCutBtn', '#exportFcpxmlBtn', '#exportEdlBtn',
+        '#cutSourceGroup input[value="vad"]', '#cutSourceGroup input[value="whisperx"]', '.note-item',
       ];
       const controls = await page.evaluate((selectors) => selectors.map((selector) => {
         const el = document.querySelector(selector);
@@ -103,6 +104,8 @@ function makeServer() {
         assert.notEqual(control.display, 'none', `hidden responsive control ${control.selector} at ${width}px`);
         assert.notEqual(control.visibility, 'hidden', `invisible responsive control ${control.selector} at ${width}px`);
         assert.ok(control.width > 0 && control.height > 0, `zero-area responsive control ${control.selector} at ${width}px: ${JSON.stringify(control)}`);
+        // The player page is intentionally vertically scrolling; this gate defines
+        // reachability as horizontal containment while requiring positive area.
         assert.ok(control.left >= -1 && control.right <= width + 1,
           `horizontally unreachable responsive control ${control.selector} at ${width}px: ${JSON.stringify(control)}`);
       }
@@ -120,6 +123,11 @@ function makeServer() {
           assert.ok(Math.abs(geometry.height - 56) < 0.5, `player-controls height changed at 1024px: ${JSON.stringify(geometry)}`);
           assert.ok(Math.abs(geometry.syncWidth - 388.48) < 0.5, `sync-nudge geometry changed at 1024px: ${JSON.stringify(geometry)}`);
           assert.ok(Math.abs(geometry.syncHeight - 40) < 0.5, `sync-nudge height changed at 1024px: ${JSON.stringify(geometry)}`);
+        } else if ([1280, 1440, 1920].includes(width)) {
+          assert.ok(Math.abs(geometry.width - 925.875) < 0.5, `player-controls geometry changed at ${width}px: ${JSON.stringify(geometry)}`);
+          assert.ok(Math.abs(geometry.height - 42) < 0.5, `player-controls height changed at ${width}px: ${JSON.stringify(geometry)}`);
+          assert.ok(Math.abs(geometry.syncWidth - 388.484) < 0.5, `sync-nudge geometry changed at ${width}px: ${JSON.stringify(geometry)}`);
+          assert.ok(Math.abs(geometry.syncHeight - 40) < 0.5, `sync-nudge height changed at ${width}px: ${JSON.stringify(geometry)}`);
         }
       }
     }
