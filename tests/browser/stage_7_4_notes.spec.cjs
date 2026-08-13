@@ -91,14 +91,33 @@ function makeServer() {
         '#regenerateCutBtn', '#exportFcpxmlBtn', '#exportEdlBtn',
         '#cutSourceGroup input[value="vad"]', '#cutSourceGroup input[value="whisperx"]', '.note-item',
       ];
-      const controls = await page.evaluate((selectors) => selectors.map((selector) => {
-        const el = document.querySelector(selector);
-        if (!el) return { selector, missing: true };
-        const rect = el.getBoundingClientRect();
-        const style = getComputedStyle(el);
-        return { selector, display: style.display, visibility: style.visibility, width: rect.width, height: rect.height,
-          left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-      }), required);
+      const controls = [];
+      for (const selector of required) {
+        const locator = page.locator(selector).first();
+        if (await locator.count() === 0) {
+          controls.push({ selector, missing: true });
+          continue;
+        }
+        await locator.scrollIntoViewIfNeeded();
+        controls.push(await locator.evaluate((el, selector) => {
+          const rect = el.getBoundingClientRect();
+          const style = getComputedStyle(el);
+          return { selector, display: style.display, visibility: style.visibility, text: el.textContent?.trim(),
+            width: rect.width, height: rect.height, left: rect.left, right: rect.right,
+            top: rect.top, bottom: rect.bottom };
+        }, selector));
+        const control = controls[controls.length - 1];
+        assert.ok(control.text || !selector.includes('.note-item'),
+          `empty populated note surface ${selector} at ${width}px`);
+        // Vertically scrolling pages can contain a panel taller than the viewport;
+        // compact targets must be wholly in view after scrolling, while oversized
+        // containers must intersect the viewport and remain horizontally contained.
+        const verticalReachable = control.height > 900
+          ? control.top < 900 && control.bottom > 0
+          : control.top >= -1 && control.bottom <= 901;
+        assert.ok(verticalReachable,
+          `vertically unreachable responsive control ${selector} at ${width}px: ${JSON.stringify(control)}`);
+      }
       for (const control of controls) {
         assert.equal(control.missing, undefined, `missing responsive control ${control.selector} at ${width}px`);
         assert.notEqual(control.display, 'none', `hidden responsive control ${control.selector} at ${width}px`);
