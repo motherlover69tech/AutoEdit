@@ -5,6 +5,7 @@ from __future__ import annotations
 import array
 import math
 import os
+import subprocess
 import sys
 import tempfile
 import wave
@@ -52,9 +53,11 @@ class AnalysisPreparationManifest(StrictContract):
     duration_ms: int = Field(gt=0)
     sample_rate: Literal[16_000]
     channels: Literal[1]
-    # Gain applied to lift quiet fixtures toward a consistent loudness so ASR
-    # does not hallucinate low-confidence words on near-silent regions. 0.0 for
-    # legacy manifests / no adjustment.
+    # Loudness normalization applied to the rendered mix so quiet fixtures with
+    # extreme crest factors (e.g. mean -38 dB with -3 dB peaks) do not yield
+    # inaudible low-confidence ASR words. "none" for legacy manifests.
+    normalization: Literal["none", "fixed_gain", "loudnorm"] = "none"
+    # Gain applied by the fixed_gain method (dB). 0.0 for "none"/"loudnorm".
     normalized_gain_db: float = 0.0
     sources: list[PreparedSource] = Field(min_length=1)
 
@@ -198,12 +201,49 @@ def _normalize_analysis_gain(
     return round(gain_db, 2)
 
 
+def _normalize_analysis_loudnorm(
+    path: Path,
+    *,
+    loudness_target: float = -20.0,
+    peak_ceiling: float = -3.0,
+    lra: float = 11.0,
+) -> str:
+    """Compress-and-normalize the mix with ffmpeg loudnorm (EBU R128).
+
+    Quiet fixtures with extreme crest factors cannot be fixed with a fixed gain
+    (the peak ceiling caps any boost). loudnorm raises the integrated loudness
+    toward ``loudness_target`` while compressing dynamics, so quiet speech
+    becomes audible and ASR stops emitting low-confidence phantom words.
+    Deterministic for identical input. Returns "loudnorm".
+    """
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.loudnorm.wav")
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", str(path),
+                "-af",
+                f"loudnorm=I={loudness_target:.1f}:TP={peak_ceiling:.1f}:LRA={lra:.1f}",
+                "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", str(tmp),
+            ],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or b"").decode(errors="replace").strip()[-500:]
+            raise AnalysisAudioError(f"loudnorm normalization failed: {detail}")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return "loudnorm"
+
+
 def prepare_analysis_audio(
     project_dir: str | Path,
     sources: list[AnalysisSource],
     *,
     output_relative_path: str = "audio/ai/analysis.wav",
     runner: Callable = run_ffmpeg_watchdog,
+    normalizer: Callable = _normalize_analysis_loudnorm,
 ) -> AnalysisPreparationManifest:
     """Render and publish analysis audio plus a hash/version provenance manifest."""
     project = Path(project_dir).resolve()
@@ -233,7 +273,8 @@ def prepare_analysis_audio(
         if rate != 16_000 or channels != 1:
             raise AnalysisAudioError("analysis audio must be mono 16 kHz PCM WAV")
 
-        normalized_gain_db = _normalize_analysis_gain(temp_path)
+        normalization = normalizer(temp_path)
+        normalized_gain_db = 0.0
 
         output_hash = sha256_file(temp_path)
         manifest = AnalysisPreparationManifest(
@@ -244,6 +285,7 @@ def prepare_analysis_audio(
             duration_ms=duration_ms,
             sample_rate=rate,
             channels=channels,
+            normalization=normalization,
             normalized_gain_db=normalized_gain_db,
             sources=prepared_sources,
         )

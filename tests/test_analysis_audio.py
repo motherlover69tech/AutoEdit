@@ -106,6 +106,7 @@ def test_prepare_writes_hashed_manifest_and_validated_audio(tmp_path: Path):
             )
         ],
         runner=runner,
+        normalizer=lambda _path: "none",
     )
 
     assert manifest.schema_version == "1.0"
@@ -229,13 +230,19 @@ def test_normalize_silence_is_unchanged(tmp_path: Path):
     assert path.read_bytes() == before
 
 
-def test_prepare_applies_normalization_and_records_gain(tmp_path: Path):
+def test_prepare_records_normalization_and_manifest_hash(tmp_path: Path):
     project = tmp_path / "project"
     _wav(project / "audio" / "lav.wav", rate=48_000, frames=48_000)
 
     def runner(command):
         _wav(Path(command[-1]), value=100)  # quiet rendered mix
         return subprocess.CompletedProcess(command, 0, "", "")
+
+    def normalizer(path):
+        from autoedit.ai.analysis_audio import _normalize_analysis_gain
+
+        _normalize_analysis_gain(path)  # real gain applied by the stub
+        return "fixed_gain"
 
     manifest = prepare_analysis_audio(
         project,
@@ -248,12 +255,29 @@ def test_prepare_applies_normalization_and_records_gain(tmp_path: Path):
             )
         ],
         runner=runner,
+        normalizer=normalizer,
     )
 
-    assert manifest.normalized_gain_db > 20
+    assert manifest.normalization == "fixed_gain"
     mean_db, _peak_db = _read_samples(project / "audio" / "ai" / "analysis.wav")
     assert -21.5 <= mean_db <= -18.5
     # manifest hash matches the published (normalized) file
     from autoedit.ai.analysis_audio import sha256_file  # noqa: PLC0415
 
     assert manifest.sha256 == sha256_file(project / "audio" / "ai" / "analysis.wav")
+
+
+def test_loudnorm_normalization_smoke(tmp_path: Path):
+    import shutil
+
+    from autoedit.ai.analysis_audio import _normalize_analysis_loudnorm
+
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not available")
+    path = tmp_path / "quiet.wav"
+    _wav(path, frames=16_000, value=100)  # mean ≈ −50.3 dB
+    method = _normalize_analysis_loudnorm(path)
+    assert method == "loudnorm"
+    mean_db, peak_db = _read_samples(path)
+    assert mean_db > -35.0  # lifted well above the input's −50 dB
+    assert peak_db <= -2.5  # true peak respects the ceiling (TP tolerance)
