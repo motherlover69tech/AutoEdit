@@ -10,9 +10,20 @@ Night-shift outcomes (2026-08-12 22:25 → 2026-08-13 01:05): queue driven auton
 4. **Browserless test container** (devops box): running on Tower :3002 (token in ops-stack/browserless/compose.yaml). Driver shim (append `?token=` to the CDP ws URL) still TBD before the Tester can use it; gateway chromium remains the active runtime. Optional.
 5. Crons stay paused (Peter drives the queue via check-ins); verify pause state on the GATEWAY copy of jobs.json before trusting it.
 
-## 1. Compliance decision queue (FINAL checks all FAILED — no further loop without you)
+## 1. Compliance decision queue — **ALL SIX AUTHORIZED (Peter, 2026-08-13 ~01:55 UTC)** ✅
 
-All five FINAL round-3 compliance checks were executed against the exact committed candidates (verified worktrees, real commits) and returned **DESIGN_COMPLIANCE_FAIL** with line-level findings. Per the review contract, no further round starts without your authorization.
+All five FINAL round-3 compliance checks FAILED with line-level findings (table below). **Peter authorized one more round for ALL six chains: "Create the cards and run them. If they can't be passed document it and move on."** The six next-round cards are RUNNING (created 01:58 UTC, all claimed with live PIDs):
+
+| Chain | Round-4 card | Worktree (builds on) | Final check that failed |
+|---|---|---|---|
+| **A** | `t_f850829c` | `.worktrees/t_5477b373` (cf915d9) | t_745ed2cc |
+| **A Gate-1** | `t_0f4a83d4` | `.worktrees/t_3cc93a59` (444f4fc+3b00689) | t_1cda8d9b |
+| **B** | `t_603fa02b` | `.worktrees/t_9b653567` (38e964e) | t_2c9e2be6 |
+| **C** | `t_68ccc838` | `.worktrees/t_08478be9` (330e67e) | t_0abbb32c |
+| **D1** | `t_9db0d442` | `.worktrees/t_00d7935c` (5bf56a6+57163b4) | t_a380c78d |
+| **D2** | `t_dc040f53` | `.worktrees/t_4b8ecc0a` (e1b6e93+1b60b2f) | t_e629e9bf |
+
+Card bodies carry the EXACT numbered findings from each final check (full text embedded; workers cannot read other cards' comments). Each round is tests-first, bounded, one final compliance check after. **Exit rule (Peter's instruction): if a chain's final check fails again, DOCUMENT it (this file + BACKLOG) and PARK it — no further loop.** On PASS: A/A-Gate1/D1/D2 close as offline tooling; B and C go through Publisher deploy after their final check passes.
 
 | Chain | Candidate | Verdict | Gap in one line | Next round would need |
 |---|---|---|---|---|
