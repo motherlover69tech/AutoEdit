@@ -2,6 +2,21 @@
 
 Night-shift outcomes (2026-08-12 22:25 → 2026-08-13 01:05): queue driven autonomously; every card that could move did. This file is the consolidated list of **what needs Peter** and **what was logged for live testing**. Nothing below blocks the pipeline; all items are decisions or live-window tests for when you're back.
 
+## ⚡ ROUND-5 OUTCOMES (2026-08-13 22:32 UTC) — C CLOSED ✅, A/A-Gate1/B/D1/D2 PARKED ⛔
+
+All six round-5 implementations ran; six final Designer checks dispatched 22:12 UTC, verdicts by 22:32 UTC. Full record: `docs/status/2026-08-13-round5-final-outcomes.md`.
+
+| Chain | Impl commit | Check card | Verdict | One-liner |
+|---|---|---|---|---|
+| A | 2aa9df4 | t_d63ed4dc | FAIL | 4/5 direct regressions absent; no parent-RED (probe passes on 12c7ec0c); all-PASS forgeable via recomputed digest; artifact_valid tautological |
+| A-Gate1 | f257f7f | t_12526b7f | FAIL | provenance registry importable+forgeable (FORGED_CALLER_SET_ACCEPTED); evaluate_current_run() accepts foreign-dir PASS |
+| B | 8ecad13 | t_0afea5ff | FAIL | swap fails closed but never completes bijection; GET still `confirmed` under contradiction; UI blank-save + swap still blocked |
+| C | a7305c8 (evidence-only) | t_16a7312f | **PASS** | genuine RED on true pre-fix ancestor 80fc8df (21 pass / 2 fail); candidate 34 focused + 857 full green — chain CLOSED, tests-only, no deploy |
+| D1 | 5b31c21 | t_24bcb7fa | FAIL | 28/28 replay rejected + deep scan pass, but discovery not derived, lifecycle bypassable, results/status still prefilled |
+| D2 | a55094a+e8e86a2 | t_e8b5557c | FAIL | subclass w/ own token still live-PASS; CLI no-op PASS path from build_mock_evidence(); 3 legacy failures ruled genuine regressions |
+
+Consequences: GATE-4 stays NOT_RUN; production stays mock; B's api.py changes NOT deployed; D1 full-suite stall confirmed environmental (reviewer: 896 passed / 27.12s); any future resurrection needs a NEW Peter decision with a different approach. Live-test blockers unchanged (checklist doc). Crons stay paused.
+
 ## ⚡ PICKUP UPDATE (2026-08-13 ~21:10 UTC) — round-5 authorized for ALL six chains
 
 Peter picked up the queue and explicitly authorized ONE more round for all six chains (new decision — the round-4 one-final-check authorization is exhausted; resurrection required exactly this). Six round-5 Programmer cards created 21:08 UTC, **tests-first**, bounded to the round-4 numbered findings (copied in full into each body), priority 100, no skill/provider overrides, same worktrees (linear chains): **A** `t_0f6cb9fb` (wt/t_5477b373, on 12c7ec0c) · **A-Gate1** `t_ee5e4c59` (wt/t_3cc93a59, on d0c54111) · **B** `t_27cc0a63` (wt/t_9b653567, on 0da3212a) · **C** `t_95f96841` (wt/t_08478be9, on a7305c8) · **D1** `t_9a9f2e1f` (wt/t_00d7935c, on 70e85d2) · **D2** `t_36144553` (wt/t_4b8ecc0a, on 78c16e1). Worktree git indexes re-owned to 10000:100 before dispatch (root-owned-index trap). All six claimed with live PIDs 21:11–21:12 UTC. One final compliance check per chain after READY_FOR_REVIEW; failure → documented + parked, no further loop. Stage 7.4 remains CLOSED; crons remain paused.
