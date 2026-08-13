@@ -29,7 +29,7 @@ All five FINAL round-3 compliance checks were executed against the exact committ
 
 - Tester acceptance on deployed `ac8407e` → **TEST_FAIL BUG-7.4-DELETE-001** (stale note markers in timeline lane after delete).
 - Fix committed (bfe6a5f); first review: **product logic PASS, probe defects FAIL** (test-only).
-- Probe repair committed (3728b71, `STAGE_7_4_XSS_GATE_PASS` with real Chromium); re-review: **RED/GREEN + contract PASS, network-observability FAIL** (probe didn't assert `requestfailed`; mock DELETE 204 vs real API 200 JSON). Reviewer-spawned correction `t_c3425ba5` RUNNING. On PASS → **Publisher deploy to live** → Tester re-run (all background).
+- Probe repair committed (3728b71, `STAGE_7_4_XSS_GATE_PASS` with real Chromium); two more test-only probe rounds (network observability, identity assertions + LUT fixture) → **DESIGN_COMPLIANCE_PASS (t_2144e23e, 00:15 UTC)**. **Publisher deploy `t_f8502a1c` (player.js 3728b71) + Tester re-run `t_2345969a` now RUNNING (background).**
 
 ## 4. Optional / infra
 - **Browserless test container** (devops container): running on Tower :3002, token-authed. Driver shim (append `?token=` to the CDP ws URL) still TBD before the Tester can use it; gateway chromium remains the active browser runtime. Low priority.
