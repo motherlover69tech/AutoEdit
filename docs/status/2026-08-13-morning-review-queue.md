@@ -44,11 +44,10 @@ Peter authorized one final round for all six ("Create the cards and run them. If
 - **GATE-3** — per-window speaker-turn cut review (editorial)
 - **GATE-4** — V100/Ollama/Dots coexistence + peak-VRAM authorization window (production stays mock until passed)
 
-## 3. Stage 7.4 — in background flow (no Peter action needed)
+## 3. Stage 7.4 — **CLOSED ✅ (03:36 UTC)**
 
-- Tester acceptance on deployed `ac8407e` → **TEST_FAIL BUG-7.4-DELETE-001** (stale note markers in timeline lane after delete).
-- Fix committed (bfe6a5f); first review: **product logic PASS, probe defects FAIL** (test-only).
-- Probe repair committed (3728b71, `STAGE_7_4_XSS_GATE_PASS` with real Chromium); two more test-only probe rounds (network observability, identity assertions + LUT fixture) → **DESIGN_COMPLIANCE_PASS (t_2144e23e, 00:15 UTC)**. **Publisher deploy `t_f8502a1c` (player.js 3728b71) + Tester re-run `t_2345969a` now RUNNING (background).**
+- Tester acceptance on deployed `ac8407e` → **TEST_FAIL BUG-7.4-DELETE-001** (stale note markers in timeline lane after delete) → fix deployed 00:23 (69f5486d) → accepted by Tester v3 `t_619890f0` (all green except NEW BUG-7.4-UI-RESPONSIVE-001).
+- Responsive fix loop: 5 review/correction rounds (probe executability, 1024 geometry, wide-geometry preservation, reachability) → **DESIGN_COMPLIANCE_PASS (t_b03e978a)** → deployed 03:32 (styles.css 232c551, image d60d773c, byte-verified) → **Tester v4 `t_e42b0506` TEST_PASS 03:36 UTC** — Stage 7.4 closed. Both fixes merged to master `1ba1783`.
 
 ## 4. Optional / infra
 - **Browserless test container** (devops container): running on Tower :3002, token-authed. Driver shim (append `?token=` to the CDP ws URL) still TBD before the Tester can use it; gateway chromium remains the active browser runtime. Low priority.
