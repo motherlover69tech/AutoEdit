@@ -159,3 +159,101 @@ def test_analysis_source_rejects_project_escape():
             sync_offset_ms=0,
             source_kind="camera_guide",
         )
+
+
+def _read_samples(path: Path) -> tuple[float, float]:
+    """Return (mean_db, peak_db) of a 16-bit mono WAV."""
+    import array
+    import math
+
+    with wave.open(str(path), "rb") as handle:
+        frames = handle.readframes(handle.getnframes())
+    samples = array.array("h")
+    samples.frombytes(frames)
+    rms = math.sqrt(sum(sample * sample for sample in samples) / len(samples))
+    peak = max(abs(sample) for sample in samples)
+    return (
+        20.0 * math.log10(rms / 32768.0),
+        20.0 * math.log10(peak / 32768.0),
+    )
+
+
+def test_normalize_quiet_audio_lifts_toward_target(tmp_path: Path):
+    from autoedit.ai.analysis_audio import _normalize_analysis_gain
+
+    path = tmp_path / "quiet.wav"
+    _wav(path, frames=16_000, value=100)  # mean ≈ −50.3 dB
+    gain = _normalize_analysis_gain(path)
+    assert gain > 20
+    mean_db, peak_db = _read_samples(path)
+    assert -21.5 <= mean_db <= -18.5
+    assert peak_db <= -3.0
+
+
+def test_normalize_loud_audio_reaches_target(tmp_path: Path):
+    from autoedit.ai.analysis_audio import _normalize_analysis_gain
+
+    path = tmp_path / "loud.wav"
+    _wav(path, frames=16_000, value=30_000)  # mean ≈ −0.77 dB, peak == rms
+    gain = _normalize_analysis_gain(path)
+    assert gain < -10  # attenuated toward the −20 dB target
+    mean_db, peak_db = _read_samples(path)
+    assert -21.5 <= mean_db <= -18.5
+    assert peak_db <= -3.0
+
+
+def test_normalize_high_crest_audio_clamps_boost_to_peak_ceiling(tmp_path: Path):
+    from autoedit.ai.analysis_audio import _normalize_analysis_gain
+
+    path = tmp_path / "crest.wav"
+    values = [100] * 15_980 + [30_000] * 20  # quiet body, hot peaks
+    raw = b"".join(int(v).to_bytes(2, "little", signed=True) for v in values)
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16_000)
+        handle.writeframes(raw)
+    gain = _normalize_analysis_gain(path)
+    assert -3.0 < gain < 0.0  # boost clamped by the −3 dB peak ceiling
+    _mean_db, peak_db = _read_samples(path)
+    assert peak_db <= -3.0
+
+
+def test_normalize_silence_is_unchanged(tmp_path: Path):
+    from autoedit.ai.analysis_audio import _normalize_analysis_gain
+
+    path = tmp_path / "silence.wav"
+    _wav(path, frames=16_000, value=0)
+    before = path.read_bytes()
+    assert _normalize_analysis_gain(path) == 0.0
+    assert path.read_bytes() == before
+
+
+def test_prepare_applies_normalization_and_records_gain(tmp_path: Path):
+    project = tmp_path / "project"
+    _wav(project / "audio" / "lav.wav", rate=48_000, frames=48_000)
+
+    def runner(command):
+        _wav(Path(command[-1]), value=100)  # quiet rendered mix
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    manifest = prepare_analysis_audio(
+        project,
+        [
+            AnalysisSource(
+                source_id="lav",
+                relative_path="audio/lav.wav",
+                sync_offset_ms=0,
+                source_kind="isolated_lav",
+            )
+        ],
+        runner=runner,
+    )
+
+    assert manifest.normalized_gain_db > 20
+    mean_db, _peak_db = _read_samples(project / "audio" / "ai" / "analysis.wav")
+    assert -21.5 <= mean_db <= -18.5
+    # manifest hash matches the published (normalized) file
+    from autoedit.ai.analysis_audio import sha256_file  # noqa: PLC0415
+
+    assert manifest.sha256 == sha256_file(project / "audio" / "ai" / "analysis.wav")

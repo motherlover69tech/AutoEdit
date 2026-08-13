@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import array
+import math
 import os
+import sys
 import tempfile
 import wave
 from datetime import UTC, datetime
@@ -49,6 +52,10 @@ class AnalysisPreparationManifest(StrictContract):
     duration_ms: int = Field(gt=0)
     sample_rate: Literal[16_000]
     channels: Literal[1]
+    # Gain applied to lift quiet fixtures toward a consistent loudness so ASR
+    # does not hallucinate low-confidence words on near-silent regions. 0.0 for
+    # legacy manifests / no adjustment.
+    normalized_gain_db: float = 0.0
     sources: list[PreparedSource] = Field(min_length=1)
 
     @field_validator("relative_path")
@@ -132,6 +139,65 @@ def build_analysis_audio_command(
     return command, selected, strategy
 
 
+def _normalize_analysis_gain(
+    path: Path,
+    *,
+    target_mean_db: float = -20.0,
+    peak_ceiling_db: float = -3.0,
+) -> float:
+    """Lift quiet fixtures toward a consistent loudness with a fixed gain.
+
+    Quiet recordings (mean well below ``target_mean_db``) make WhisperX emit
+    low-confidence words over near-silent regions that an operator cannot hear.
+    This applies one deterministic gain so ASR sees speech at a normal level,
+    clamped so the peak never exceeds ``peak_ceiling_db``. Pure silence is left
+    unchanged. Returns the applied gain in dB (0.0 when no adjustment applied).
+    """
+    with wave.open(str(path), "rb") as handle:
+        rate = handle.getframerate()
+        width = handle.getsampwidth()
+        channels = handle.getnchannels()
+        frames = handle.readframes(handle.getnframes())
+    if width != 2:
+        raise AnalysisAudioError("analysis audio must be 16-bit PCM for gain normalization")
+    if not frames:
+        return 0.0
+    samples = array.array("h")
+    samples.frombytes(frames)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    n = len(samples)
+    sumsq = 0.0
+    peak = 0
+    for sample in samples:
+        sumsq += sample * sample
+        magnitude = -sample if sample < 0 else sample
+        if magnitude > peak:
+            peak = magnitude
+    if n == 0 or sumsq <= 0 or peak <= 0:
+        return 0.0
+    rms = math.sqrt(sumsq / n)
+    current_mean_db = 20.0 * math.log10(rms / 32768.0)
+    gain_db = target_mean_db - current_mean_db
+    peak_db = 20.0 * math.log10(peak / 32768.0)
+    # 0.25 dB guard so int16 rounding of the scaled peak cannot exceed the
+    # ceiling (e.g. a clamped boost lands at exactly -3.0 dB + rounding).
+    gain_db = min(gain_db, peak_ceiling_db - peak_db - 0.25)
+    if abs(gain_db) < 0.5:
+        return 0.0
+    scale = 10.0 ** (gain_db / 20.0)
+    scaled = array.array(
+        "h",
+        (max(-32768, min(32767, int(round(sample * scale)))) for sample in samples),
+    )
+    with wave.open(str(path), "wb") as out:
+        out.setnchannels(channels)
+        out.setsampwidth(width)
+        out.setframerate(rate)
+        out.writeframes(scaled.tobytes())
+    return round(gain_db, 2)
+
+
 def prepare_analysis_audio(
     project_dir: str | Path,
     sources: list[AnalysisSource],
@@ -167,6 +233,8 @@ def prepare_analysis_audio(
         if rate != 16_000 or channels != 1:
             raise AnalysisAudioError("analysis audio must be mono 16 kHz PCM WAV")
 
+        normalized_gain_db = _normalize_analysis_gain(temp_path)
+
         output_hash = sha256_file(temp_path)
         manifest = AnalysisPreparationManifest(
             created_at=datetime.now(UTC),
@@ -176,6 +244,7 @@ def prepare_analysis_audio(
             duration_ms=duration_ms,
             sample_rate=rate,
             channels=channels,
+            normalized_gain_db=normalized_gain_db,
             sources=prepared_sources,
         )
 
