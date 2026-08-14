@@ -67,6 +67,26 @@ remaining acceptance item in the AI-GPU-1 flow.**
    LLM-backed YouTube title generator remain open in the backlog.
 5. Coordinating crons stay paused while Peter drives; resume watchdogs/dashboard on request.
 
+## 5. Tidy-ups (recorded in this commit `be8d61b`)
+
+- **Deploy wrapper safety booleans fixed** (`scripts/autoedit-deploy.sh`): the
+  `emit_json` verdict always reported `"mutation_started": "false"` and
+  `"candidate_live": "false"` even after a real rebuild+recreate — the local
+  parser never derived them from the remote output. They now derive from the
+  remote `RESULT:mutation_started` marker and the terminal verdict, so future
+  deploy JSONs are honest. (Older wrapper JSONs: treat those two fields as
+  unset; image SHA + `RESULT:` lines are the truth.)
+- **Session records committed and pushed:** this doc + checklist GATE-3 update
+  + BACKLOG current-state/next-action update + the wrapper fix landed as commit
+  `be8d61b` on master, pushed to origin and verified
+  (`git ls-remote` == `git rev-parse HEAD` == `be8d61b65396…`).
+- **Ops lessons saved to the `autoedit-ops` skill** as
+  `references/tower-ssh-deploy-2026-08-14.md` (Tower host has no python3/jq;
+  `curl -d` defaults to POST — use `-X PUT`; mass-archive recipe for
+  superseded cards; reusable `scripts/ssh_tower.py` / `run_on_tower.py` /
+  `sftp_get.py` helpers; deploy payload note — compose/.env changes are NOT
+  carried by the deploy script; verified GATE-3 regeneration sequence).
+
 ## Evidence pointers (private, on-array — not in Git)
 
 - `/mnt/user/automulticam/ai-gpu-1-acceptance/20260813-live-window/`
