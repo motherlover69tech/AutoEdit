@@ -71,3 +71,10 @@ def validate_confirmation_payload(*, artifact: dict[str, Any], diarizer_speaker_
         raise ValueError("evidence turns must belong to the anonymous speaker")
     if not speaker_id.strip() or not camera_id.strip():
         raise ValueError("speaker and camera association are required")
+
+
+def validate_application_confirmation(*, artifact: dict[str, Any], diarizer_speaker_id: str, speaker_id: str, project_speaker_ids: set[str], evidence_turn_ids: list[str]) -> None:
+    """Validate confirmation at the application authority boundary."""
+    if speaker_id not in project_speaker_ids:
+        raise ValueError("speaker does not belong to project")
+    validate_confirmation_payload(artifact=artifact, diarizer_speaker_id=diarizer_speaker_id, speaker_id=speaker_id, camera_id="application", evidence_turn_ids=evidence_turn_ids)

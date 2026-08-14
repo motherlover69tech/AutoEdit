@@ -29,9 +29,12 @@ class GPUJobManager:
         self,
         runner: Callable[[Any], dict[str, Any]],
         *,
+        max_workers: int = 1,
         max_pending: int = 8,
         max_history: int = 100,
     ):
+        if max_workers != 1:
+            raise ValueError("GPU worker concurrency must remain exactly one")
         if max_pending <= 0:
             raise ValueError("max_pending must be positive")
         if max_history <= 0:
@@ -39,7 +42,7 @@ class GPUJobManager:
         self._runner = runner
         self._max_pending = max_pending
         self._max_history = max_history
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="whisperx-gpu")
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="whisperx-gpu")
         self._lock = threading.Lock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._futures: dict[str, Future] = {}

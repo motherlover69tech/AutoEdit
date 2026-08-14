@@ -1,7 +1,7 @@
 import {
   speakerBadge,
-  suggestedPrefill,
-  confirmationSaveDisabled,
+  batchConfirmationSaveDisabled,
+  confirmationExpectedVersion,
   confidenceLabel,
   regenerationOutcome,
 } from './speaker_mapping_logic.js';
@@ -423,15 +423,14 @@ async function loadSpeakerConfirmations() {
     if (!data.labels.length) { target.innerHTML = '<p class="mono-note">No anonymous turns are available. Complete diarization before confirming identity.</p>'; return; }
     target.innerHTML = data.labels.map((item) => {
       const confirmation = item.confirmation || {};
-      const suggestion = suggestedPrefill(item);
       const badge = speakerBadge(item.status);
-      const suggestedSpeaker = suggestion.speakerId;
-      const suggestedCamera = suggestion.cameraId;
-      const options = data.speakers.map((speaker) => `<option value="${escapeHtml(speaker)}" ${((confirmation.speaker_id || suggestedSpeaker) === speaker) ? 'selected' : ''}>${escapeHtml(speaker)}</option>`).join('');
-      const cameras = data.cameras.map((camera) => `<option value="${escapeHtml(camera.id)}" ${((confirmation.camera_id || suggestedCamera) === camera.id) ? 'selected' : ''}>${escapeHtml(camera.label)} (${escapeHtml(camera.role)})</option>`).join('');
-      const snippetsHtml = item.snippets.map((clip) => `<div class="confirmation-snippet"><audio controls preload="none" src="${escapeHtml(clip.url)}" aria-label="Program audio snippet ${escapeHtml(clip.start_ms)} to ${escapeHtml(clip.end_ms)} milliseconds"></audio><span class="mono-note">${escapeHtml(clip.start_ms)}–${escapeHtml(clip.end_ms)} ms</span></div>`).join('');
-      return `<fieldset class="confirmation-row" data-confirm-label="${escapeHtml(item.diarizer_speaker_id)}"><legend><b>${escapeHtml(item.diarizer_speaker_id)}</b> <span class="badge ${badge.tone}">${badge.label}</span></legend><p class="mono-note">${item.status === 'suggested' ? 'Automatic suggestion — explicitly confirm before saving.' : item.status === 'stale' ? 'This mapping is stale for the current AI run.' : 'Confirm identity only; this does not change sync.'}</p><div class="confirmation-snippets">${snippetsHtml || '<span class="mono-note">No bounded snippets available; confirmation is disabled.</span>'}</div><p class="mono-note">Confidence: ${confidenceLabel(item.confidence)}</p><label class="field">Existing speaker<select data-confirm-speaker><option value="">Choose a speaker…</option>${options}</select></label><label class="field">Close camera<select data-confirm-camera><option value="">Choose a camera…</option>${cameras}</select></label><button class="btn btn-primary btn-sm" type="button" data-confirm-save disabled title="Choose a speaker and camera, with at least two snippets">Save confirmed mapping</button></fieldset>`;
+      const options = data.speakers.map((speaker) => `<option value="${escapeHtml(speaker)}">${escapeHtml(speaker)}</option>`).join('');
+      const cameras = data.cameras.map((camera) => `<option value="${escapeHtml(camera.id)}">${escapeHtml(camera.label)} (${escapeHtml(camera.role)})</option>`).join('');
+      const snippetsHtml = item.snippets.map((clip) => `<div class="confirmation-snippet"><audio controls preload="none" src="${escapeHtml(clip.url)}" aria-label="Program audio snippet ${escapeHtml(clip.start_ms)} to ${escapeHtml(clip.end_ms)} milliseconds"></audio><video muted playsinline preload="none" src="${escapeHtml(clip.video_url || '')}" aria-label="Silent proxy video snippet ${escapeHtml(clip.start_ms)} to ${escapeHtml(clip.end_ms)} milliseconds"></video><span class="mono-note">${escapeHtml(clip.start_ms)}–${escapeHtml(clip.end_ms)} ms</span></div>`).join('');
+      const statusCopy = item.status === 'suggested' ? 'Suggestion is not authority — choose both fields explicitly.' : item.status === 'stale' || item.status === 'revalidation_required' ? 'This mapping is stale and may affect every downstream speaker turn safely-wide; reload and reconfirm current voice evidence.' : item.status === 'conflict' ? 'Conflict: this voice is unresolved and Wide will be used until confirmed.' : 'Confirm identity only; this does not change sync.';
+      return `<fieldset class="confirmation-row" data-confirm-label="${escapeHtml(item.diarizer_speaker_id)}"><legend><b>${escapeHtml(item.diarizer_speaker_id)}</b> <span class="badge ${badge.tone}">${badge.label}</span></legend><p class="mono-note">${statusCopy}</p>${['stale','revalidation_required','conflict'].includes(item.status) ? '<button type="button" class="btn btn-quiet btn-sm" data-confirm-reload>Reload and reconfirm</button>' : ''}<div class="confirmation-snippets">${snippetsHtml || '<span class="mono-note">No bounded snippets available; confirmation is disabled.</span>'}</div><p class="mono-note">Confidence: ${confidenceLabel(item.confidence)}</p><label class="field">Existing speaker<select data-confirm-speaker><option value="">Choose a speaker…</option>${options}</select></label><label class="field">Close camera<select data-confirm-camera><option value="">Choose a camera…</option>${cameras}</select></label><label class="confirmation-ack"><input type="checkbox" data-confirm-ack> I listened to at least two snippets and acknowledge this mapping.</label></fieldset>`;
     }).join('');
+    target.insertAdjacentHTML('beforeend', '<div class="confirmation-batch-actions"><button class="btn btn-primary" type="button" data-confirm-save-all disabled title="Complete and acknowledge every row before saving">Save all confirmed mappings</button><p class="mono-note">All rows save together in one transaction; partial mappings are never published.</p></div>');
     const vadButton = qs('useVadBaselineBtn');
     const whisperButton = qs('regenerateWhisperxBtn');
     if (vadButton) {
@@ -444,21 +443,43 @@ async function loadSpeakerConfirmations() {
       whisperButton.title = readyForWhisper ? 'Creates a candidate; current cut remains unchanged' : 'Requires Gate 1, a wide camera, and confirmed mappings for every anonymous voice';
       whisperButton.onclick = () => regenerateCandidate('whisperx', whisperButton);
     }
-    target.querySelectorAll('[data-confirm-label]').forEach((row) => {
+    const saveAll = target.querySelector('[data-confirm-save-all]');
+    const rows = [...target.querySelectorAll('[data-confirm-label]')];
+    const rowState = (row) => ({
+      speakerId: row.querySelector('[data-confirm-speaker]').value,
+      cameraId: row.querySelector('[data-confirm-camera]').value,
+      snippetCount: row.querySelectorAll('audio').length,
+      acknowledged: row.querySelector('[data-confirm-ack]').checked,
+    });
+    const refreshAll = () => { saveAll.disabled = batchConfirmationSaveDisabled(rows.map(rowState)); };
+    rows.forEach((row) => {
       const speaker = row.querySelector('[data-confirm-speaker]');
       const camera = row.querySelector('[data-confirm-camera]');
-      const button = row.querySelector('[data-confirm-save]');
-      const refresh = () => { button.disabled = confirmationSaveDisabled({ speakerId: speaker.value, cameraId: camera.value, snippetCount: row.querySelectorAll('audio').length }); };
-      speaker.addEventListener('change', refresh); camera.addEventListener('change', refresh); refresh();
-      button.addEventListener('click', async () => {
-        button.disabled = true;
-        try {
-          const label = row.dataset.confirmLabel;
-          const item = data.labels.find((candidate) => candidate.diarizer_speaker_id === label);
-          await api(`/projects/${state.activeProject.id}/speaker-confirmations`, { method: 'PUT', body: JSON.stringify({ diarizer_speaker_id: label, speaker_id: speaker.value, camera_id: camera.value, source_run_id: data.run_id, source_artifact_version: data.artifact_version, evidence_turn_ids: item.snippets.map((snippet) => snippet.turn_id), expected_version: item.confirmation?.version || null }) });
-          setStatus(`Confirmed ${label}.`, 'ok'); await loadSpeakerConfirmations();
-        } catch (err) { setStatus(`Confirmation failed: ${err.message}`, ''); refresh(); }
-      });
+      const acknowledge = row.querySelector('[data-confirm-ack]');
+      const item = data.labels.find((candidate) => candidate.diarizer_speaker_id === row.dataset.confirmLabel);
+      speaker.value = item?.confirmation?.speaker_id || '';
+      camera.value = item?.confirmation?.camera_id || '';
+      row.querySelectorAll('audio, video').forEach((media) => { media.addEventListener('error', () => setStatus('Snippet playback failed; reload and try again.', '')); media.addEventListener('play', () => setStatus('Playing bounded confirmation snippet.', 'ok')); });
+      row.querySelector('[data-confirm-reload]')?.addEventListener('click', () => loadSpeakerConfirmations());
+      speaker.addEventListener('change', refreshAll); camera.addEventListener('change', refreshAll); acknowledge.addEventListener('change', refreshAll);
+    });
+    refreshAll();
+    saveAll.addEventListener('click', async () => {
+      saveAll.disabled = true;
+      try {
+        const mappings = rows.map((row) => {
+          const item = data.labels.find((candidate) => candidate.diarizer_speaker_id === row.dataset.confirmLabel);
+          return {
+            diarizer_speaker_id: row.dataset.confirmLabel,
+            speaker_id: row.querySelector('[data-confirm-speaker]').value,
+            camera_id: row.querySelector('[data-confirm-camera]').value,
+            evidence_turn_ids: item.snippets.map((snippet) => snippet.turn_id),
+            expected_version: confirmationExpectedVersion(item.confirmation),
+          };
+        });
+        await api(`/projects/${state.activeProject.id}/speaker-confirmations/batch`, { method: 'PUT', body: JSON.stringify({ source_run_id: data.run_id, source_artifact_version: data.artifact_version, mappings }) });
+        setStatus('All speaker mappings saved atomically.', 'ok'); await loadSpeakerConfirmations();
+      } catch (err) { setStatus(`Confirmation batch failed: ${err.message}`, ''); refreshAll(); }
     });
   } catch (err) { target.innerHTML = `<p class="mono-note">Speaker confirmation unavailable: ${escapeHtml(err.message)}</p>`; }
 }

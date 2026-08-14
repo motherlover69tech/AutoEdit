@@ -50,6 +50,7 @@ def activity_from_turns(
 
     boundaries = {0, timeline_end_ms}
     normalized: list[tuple[int, int, str | None, bool, bool, float | None, str | None]] = []
+    parsed: list[tuple[int, int, Mapping[str, Any]]] = []
     for turn in turns:
         if isinstance(turn, Mapping):
             value = turn
@@ -62,30 +63,73 @@ def activity_from_turns(
             raise ActivityProjectionError("turn timestamps must be integers")
         if start < 0 or end > timeline_end_ms or end <= start:
             raise ActivityProjectionError("turn timestamps must be within the master timeline")
-        speaker = value.get("speaker_id")
-        confidence = value.get("confidence")
-        if confidence is not None and (
-            not isinstance(confidence, (int, float))
-            or isinstance(confidence, bool)
-            or not math.isfinite(confidence)
-            or confidence < 0
-            or confidence > 1
-        ):
-            raise ActivityProjectionError("turn confidence must be finite and between 0 and 1")
-        # Suggested mappings are evidence, never camera authority.  A raw
-        # diarizer label is likewise unresolved unless the caller explicitly
-        # marks it as confirmed (the API passes only confirmed rows here).
-        provenance = value.get("provenance")
-        mapping_status = value.get("mapping_status")
-        authoritative = (
-            provenance in {"confirmed_mapping", "prior_confirmed_mapping"}
-            and mapping_status == "confirmed"
-        )
-        off_camera = bool(value.get("off_camera") or value.get("uncertain_camera"))
-        known = authoritative and not off_camera and bool(speaker) and (confidence is None or confidence >= confidence_threshold)
-        reason_override = "off_camera:wide" if off_camera else None
-        normalized.append((start, end, str(speaker) if known else None, not known, confidence is not None and confidence < confidence_threshold, confidence, reason_override))
-        boundaries.update((start, end))
+        parsed.append((start, end, value))
+
+    # Gap authority comes from the timeline, never caller order. Equal-onset
+    # turns share the same predecessor state so reversing concurrent input
+    # cannot change whether either turn is classified as post-gap.
+    previous_end = 0
+    by_start: dict[int, list[tuple[int, Mapping[str, Any]]]] = {}
+    for start, end, value in sorted(parsed, key=lambda item: (item[0], item[1])):
+        by_start.setdefault(start, []).append((end, value))
+    for original_start, group in by_start.items():
+        predecessor_end = previous_end
+        for end, value in group:
+            speaker = value.get("speaker_id")
+            confidence = value.get("confidence")
+            if confidence is not None and (
+                not isinstance(confidence, (int, float))
+                or isinstance(confidence, bool)
+                or not math.isfinite(confidence)
+                or confidence < 0
+                or confidence > 1
+            ):
+                raise ActivityProjectionError("turn confidence must be finite and between 0 and 1")
+            # Suggested mappings are evidence, never camera authority. A raw
+            # diarizer label is likewise unresolved unless explicitly confirmed.
+            provenance = value.get("provenance")
+            mapping_status = value.get("mapping_status")
+            authoritative = (
+                provenance in {"confirmed_mapping", "prior_confirmed_mapping"}
+                and mapping_status == "confirmed"
+            )
+            off_camera = bool(value.get("off_camera") or value.get("uncertain_camera"))
+            crossing_word_starts: list[int] = []
+            for word in value.get("aligned_words", []):
+                if not isinstance(word, Mapping):
+                    continue
+                word_start, word_end = word.get("start_ms"), word.get("end_ms")
+                if (
+                    isinstance(word_start, int)
+                    and not isinstance(word_start, bool)
+                    and isinstance(word_end, int)
+                    and not isinstance(word_end, bool)
+                    and 0 <= word_start < original_start < word_end <= timeline_end_ms
+                ):
+                    crossing_word_starts.append(word_start)
+            # POSTGAP-R1: onset snap is general, not conditional on a gap.
+            start = min(crossing_word_starts, default=original_start)
+            # POSTGAP-R2: only the sorted predecessor state classifies the gap.
+            post_gap_confusion = bool(crossing_word_starts) and predecessor_end < original_start
+            known = (
+                authoritative
+                and not off_camera
+                and not post_gap_confusion
+                and bool(speaker)
+                and (confidence is None or confidence >= confidence_threshold)
+            )
+            low_confidence = post_gap_confusion or (
+                confidence is not None and confidence < confidence_threshold
+            )
+            reason_override = "off_camera:wide" if off_camera else None
+            if post_gap_confusion:
+                reason_override = "low_confidence:wide"
+            normalized.append(
+                (start, end, str(speaker) if known else None, not known,
+                 low_confidence, confidence, reason_override)
+            )
+            boundaries.update((start, end))
+        previous_end = max(previous_end, *(end for end, _value in group))
 
     ordered = sorted(boundaries)
     result: list[dict[str, Any]] = []

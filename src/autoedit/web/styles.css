@@ -160,6 +160,10 @@ textarea:focus { outline: none; border-color: var(--red); }
 .confirmation-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
 .confirmation-actions .mono-note { flex-basis: 100%; }
 .badge.suggested { color: var(--warn); border-color: rgba(201,162,39,.45); }
+.badge.err { color: var(--err); border-color: rgba(217,83,79,.55); }
+.confirmation-ack { display: flex; gap: 8px; align-items: flex-start; margin: 14px 0; font-size: 13px; }
+.confirmation-ack input { accent-color: var(--red); }
+.confirmation-batch-actions { display: grid; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
 @media (max-width: 840px) { .confirmation-row { display: grid; } .confirmation-snippet audio { width: 100%; } }
 @media (max-width: 640px) { .confirmation-actions button { width: 100%; } .confirmation-actions { display: grid; } }
 

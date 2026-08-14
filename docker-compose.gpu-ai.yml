@@ -51,6 +51,8 @@ services:
       WHISPER_ALIGN: ${WHISPER_ALIGN:-true}
       WHISPER_DIARIZE: ${WHISPER_DIARIZE:-false}
       WHISPER_DIARIZATION_MODEL: ${WHISPER_DIARIZATION_MODEL:-pyannote/speaker-diarization-3.1}
+      # Machine-readable topology evidence for the read-only GATE-4 observer.
+      WHISPERX_MAX_CONCURRENT_JOBS: "1"
       # Optional gated-model token. Supply through the deployment environment;
       # never commit it to either env file.
       HF_TOKEN: ${HF_TOKEN:-}

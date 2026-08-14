@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import {
   speakerBadge,
-  suggestedPrefill,
-  confirmationSaveDisabled,
+  batchConfirmationSaveDisabled,
+  confirmationExpectedVersion,
   confidenceLabel,
   regenerationOutcome,
   safeText,
@@ -13,11 +13,17 @@ import {
 assert.deepEqual(speakerBadge('confirmed'), { label: 'Confirmed', tone: 'ok' });
 assert.deepEqual(speakerBadge('suggested'), { label: 'Suggested', tone: 'suggested' });
 assert.equal(speakerBadge('worker_failed').label, 'Needs confirmation');
-assert.deepEqual(suggestedPrefill({ status: 'suggested', suggested_speaker_id: 'Alice', suggested_camera_id: 'cam-a' }), { speakerId: 'Alice', cameraId: 'cam-a' });
-assert.deepEqual(suggestedPrefill({ status: 'suggested', suggested_speaker_id: 'Alice', suggested_camera_id: null }), { speakerId: 'Alice', cameraId: '' });
-assert.equal(confirmationSaveDisabled({ speakerId: 'Alice', cameraId: 'cam-a', snippetCount: 1 }), true);
-assert.equal(confirmationSaveDisabled({ speakerId: 'Alice', cameraId: 'cam-a', snippetCount: 2 }), false);
-assert.equal(confirmationSaveDisabled({ speakerId: '', cameraId: 'cam-a', snippetCount: 2 }), true);
+const complete = [
+  { speakerId: 'Alice', cameraId: 'cam-a', snippetCount: 2, acknowledged: true },
+  { speakerId: 'Bob', cameraId: 'cam-b', snippetCount: 2, acknowledged: true },
+];
+assert.equal(batchConfirmationSaveDisabled(complete), false);
+assert.equal(batchConfirmationSaveDisabled([{ ...complete[0] }, { ...complete[1], speakerId: '' }]), true);
+assert.equal(batchConfirmationSaveDisabled([{ ...complete[0] }, { ...complete[1], speakerId: 'Alice' }]), true);
+assert.equal(batchConfirmationSaveDisabled([{ ...complete[0] }, { ...complete[1], acknowledged: false }]), true);
+assert.equal(confirmationExpectedVersion({ is_current: true, version: 3 }), 3);
+assert.equal(confirmationExpectedVersion({ is_current: false, version: 3 }), null);
+assert.equal(confirmationExpectedVersion(null), null);
 assert.equal(confidenceLabel(0.876), '88% reported confidence');
 assert.equal(confidenceLabel(null), 'Not reported');
 assert.equal(confidenceLabel(undefined), 'Not reported');

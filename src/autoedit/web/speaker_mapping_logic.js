@@ -3,20 +3,24 @@ export const SPEAKER_STATUS_BADGES = Object.freeze({
   suggested: { label: 'Suggested', tone: 'suggested' },
   needs_confirmation: { label: 'Needs confirmation', tone: 'neutral' },
   stale: { label: 'Stale', tone: 'warn' },
+  conflict: { label: 'Conflict — Wide', tone: 'err' },
+  revalidation_required: { label: 'Revalidation required', tone: 'warn' },
 });
 
 export function speakerBadge(status) {
   return SPEAKER_STATUS_BADGES[status] || SPEAKER_STATUS_BADGES.needs_confirmation;
 }
 
-export function suggestedPrefill(item) {
-  return item?.status === 'suggested'
-    ? { speakerId: item.suggested_speaker_id || '', cameraId: item.suggested_camera_id || '' }
-    : { speakerId: '', cameraId: '' };
+export function batchConfirmationSaveDisabled(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return true;
+  if (rows.some((row) => !row.speakerId || !row.cameraId || Number(row.snippetCount) < 2 || !row.acknowledged)) return true;
+  const speakers = rows.map((row) => row.speakerId);
+  const cameras = rows.map((row) => row.cameraId);
+  return new Set(speakers).size !== rows.length || new Set(cameras).size !== rows.length;
 }
 
-export function confirmationSaveDisabled({ speakerId, cameraId, snippetCount }) {
-  return !speakerId || !cameraId || Number(snippetCount) < 2;
+export function confirmationExpectedVersion(confirmation) {
+  return confirmation?.is_current ? (confirmation.version ?? null) : null;
 }
 
 export function confidenceLabel(value) {

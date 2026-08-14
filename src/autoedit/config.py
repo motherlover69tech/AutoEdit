@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     db_name: str = Field(default="autoedit", alias="DB_NAME")
     db_user: str = Field(default="autoedit", alias="DB_USER")
     db_password: str = Field(default="", alias="DB_PASSWORD")
+    db_sort_buffer_size: int = Field(
+        default=16 * 1024 * 1024,
+        ge=256 * 1024,
+        le=64 * 1024 * 1024,
+        alias="DB_SORT_BUFFER_SIZE",
+    )
 
     # LLM / AI settings
     ollama_base_url: str = Field(default="http://192.168.50.50:11434", alias="OLLAMA_BASE_URL")

@@ -1,63 +1,167 @@
-# AUTOEDIT — Next-stage work (post round-7 / live window)
+# AUTOEDIT — Redesigned next-stage work: local implementation record
 
-Date: 2026-08-14. Purpose: the single pickup list for the next stage. Every item = a verified finding + precise spec + owner + the decision it needs. Sources: round-7 check verdicts (`t_3d25e9ea`, `t_d8dffaa4`, `t_85c5cd26`), the live-window record (`docs/status/2026-08-14-live-window-record.md`), the checklist (`docs/status/2026-08-12-d2-gate4-live-test-checklist.md`).
+Date: 2026-08-14. This supersedes the parked round-7 pickup state in this file.
+Peter explicitly asked the coordinator to redesign and implement W1–W6 directly,
+without Kanban workers. No production deployment or live mutation was performed.
 
-## Gate status
+## Current gate status
 
-| Gate | State |
+| Gate | Current state |
 |---|---|
-| GATE-1 word timing | **PASS** (round-2 accepted; loudnorm prep fixed the quiet-fixture root cause) |
-| GATE-2 speaker identity | **PASS** (both voices re-confirmed for `live-20260814T004600Z`) |
-| GATE-3 cut review | **OPEN — decision needed (W1)** |
-| GATE-4 coexistence | **PASS** (re-measured; min real headroom 17,176 MiB ≥ 3,277) |
+| GATE-1 word timing | **PASS** from the completed live window. |
+| GATE-2 speaker identity | **PASS** from the completed live window. |
+| GATE-3 cut review | **OPEN FOR ROLLOUT/RE-REVIEW.** The POSTGAP-R1/R2 redesign passes locally, but the live candidate has not been regenerated or re-reviewed. |
+| GATE-4 coexistence | **PASS** from the manual live window. The new read-only D2 observer passes locally; no new live collector run was performed. |
 
-Production remains `WHISPER_BACKEND=mock` / `DIARIZE_BACKEND=mock`; crons paused.
+Production remains `WHISPER_BACKEND=mock` / `DIARIZE_BACKEND=mock`. Coordinating
+crons remain paused. No deploy, regeneration, or production re-review occurred.
 
-## Work items
+## Completed local redesigns
 
-### W1 — GATE-3: decision + post-gap fix (needs Peter's decision first)
-- **Decision:** (a) accept the current candidate with findings (5 documented boundary-crossing post-gap clips — `20260814-live-window-gate4/browser-review.json`), or (b) resurrection card scoped to the check's findings (requires Peter's explicit go).
-- **If (b), the spec (from check `t_85c5cd26`):**
-  - `POSTGAP-R1` — GENERAL turn-onset snap: every projected turn that would cut into an earlier-started aligned word snaps to that word's start (frame-boundary ms) — not only inside the post-gap branch. Probe: turns `[0,1000]`/`[1000,2000]`, turn-2 word `[900,1100]` → projection must start the second turn at 900.
-  - `POSTGAP-R2` — order-independent gap classification: silence-gap detection derived from the sorted timeline, never caller-order (`previous_end` in input order). A reordered `diarization_turns` input must produce identical output (no false post-gap → no spurious wide).
-  - RED regression fixture committed FIRST (both probes above fail on current code, pass after); focused + full pinned suite green (`OLLAMA_BASE_URL='' LLM_MODEL='' env -u VIRTUAL_ENV uv run pytest -q -rs`).
-- **Flow after PASS:** one final check (Designer) → merge (narrow diff) → deploy app-only via `scripts/autoedit-deploy.sh` (backup → push → rebuild → verify; mock stays) → regenerate the candidate from artifact `live-20260814T004600Z` + existing confirmations (no re-analysis, no re-listening) → Peter re-review.
+### W1 — GATE-3 resurrection: implemented and locally PASS
 
-### W2 — Package A: new approach required (parked; resurrection needs Peter's decision + a different approach)
-Findings from `t_3d25e9ea` (three rounds of failure on the same security property — rethink the approach before any resurrection):
-1. **Forged all-PASS still accepted:** `construction_proof` is serialized into the evidence, attacker-controlled, and fed back as validation context — an independent replay converted a validator-built BLOCKED/FAIL into an accepted PASS. The digest is unkeyed SHA-256 over public fields; the purported per-run secret is disclosed in the evidence and self-authenticates. → Requirement: keyed digest or real signature whose secret NEVER appears in the evidence payload; proof authority validator-side only.
-2. **Direct on-disk regressions absent:** no committed tests for nonexistent artifact, wrong stored-byte digest, or stored-timestamp mismatch against the on-disk artifact.
-3. **Corrected probe has no RED:** passes on BOTH ancestors `12c7ec0c` and `2aa9df4` (it exercises the digest-mismatch path, which passes on ancestors too) — the probe must target the actually-changed construction boundary.
-4. **`artifact_valid` tautological:** equality rejection precedes the equality-based result (`golden_fixture.py:694-695` vs `:728`) — derive the result from an independent check.
+- `POSTGAP-R1`: onset snapping is general. A turn beginning at 1000 ms with an
+  aligned word crossing `[900,1100]` projects from 900 ms.
+- `POSTGAP-R2`: gap classification is derived from a sorted timeline and is
+  independent of caller order.
+- Ambiguous post-gap crossing-word cases fail safely to wide.
+- Aligned words now travel through the real artifact → API projection path.
+- Existing activity/cut/atomicity regressions remain green.
 
-### W3 — Package B: surgical fixes (parked; resurrection needs Peter's decision; do NOT deploy `080784f`)
-Findings from `t_d8dffaa4`:
-1. `BACKEND-AIGPU1-003` — the complete two-row swap must run as ONE transaction; today the endpoint rejects the one-row pending resolution (409) before the pair transaction can run. The swap must allow the pair resolution when current-voice evidence exists for both rows.
-2. `UI-AIGPU1-003` — cross-row completeness: save must be disabled until ALL unresolved rows are filled (`app.js:449-450`, `speaker_mapping_logic.js:14-19` never inspect other blank rows).
-3. Tests-first with parent RED (round-6 added no tests; focused 7 green covers neither surviving defect).
-- After a check PASS: rollout decision still required before deploy (touches the speaker-confirmation flow). Resolver conflict GET + conflict UI rendering already PASS.
+**Still required for live closure:** deploy the reviewed snapshot, regenerate the
+candidate from the existing accepted artifact/confirmations, and perform Peter's
+GATE-3 editorial re-review. Do not claim GATE-3 PASS before that flow completes.
 
-### W4 — A-Gate1 check completion (in progress; no decision needed)
-- Both check attempts silent-exited without a verdict (`t_fe9c14a5`, then the re-dispatch `t_04f4a59e`). Worktrees verified clean at `64643f8`; production untouched; designer agent log ends 01:58:46 with normal tool activity, no traceback (session/route failure mid-check).
-- Next: investigate the worker silent exit (agent.log / route) BEFORE a third attempt — do not re-dispatch blindly. Then complete the one mandated check (body = `Round-7 FINAL compliance check — Package A Gate-1`).
+### W2 — Package A: trust architecture replaced and locally PASS
 
-### W5 — D2 / GATE-4 executor rebuild (parked, multi-day; needs a separate Peter decision)
-Unchanged scope: real concrete orchestration (Compose parse/render, worker/Dots/Ollama boundaries, health checks, continuous phase-marked sampler), provenance from observed boundary responses only, repair the 3 legacy tests. Note: the live window already produced GATE-4 evidence manually (PASS); D2's value = automating it. Reference: `docs/plans/ai-gpu-1-corrective-pickup.md`.
+The rejected self-authenticating proof design was removed. `RunEvidence` is now
+portable observation data, not verdict authority. It contains no caller-authored
+status, gate result, `construction_proof`, `evidence_digest`, or `artifact_valid`.
 
-### W6 — Tech debt / live-window lessons (backlog; no decisions needed)
-- **W6.1 `/cuts` MySQL sort-buffer (live 500, fixed ad hoc):** durable fix = `sort_buffer_size` in the compose/env config + index on `cuts(project_id, created_at, id)`; the live fix (SET GLOBAL 16M + container conf.d `zz-sortbuf.cnf`) is ephemeral to the container.
-- **W6.2 GPU sampler cross-check:** validate the `used` column against the per-process sum; flag >20% discrepancies. nvidia-smi transients during pyannote churn produced false 294 MiB "headroom" readings (proven by per-process sums at the same instants).
-- **W6.3 Worker test envs:** pin `OLLAMA_BASE_URL='' LLM_MODEL=''` — `test_conciseness` calls the external LLM path, loads Qwen into Ollama (8.9 GB), and stalls; breaks any Ollama-empty requirement.
-- **W6.4 Dots job status timing:** the API flips to `completed` ~40 s before the long-form WAV finishes assembling — measure completion by output-file mtime.
-- **W6.5 Diarization quality (worker-level):** post-gap cluster confusion (the GATE-3 root cause) — label-continuation validation via pre-gap cluster embedding similarity; W1's projection fail-closed is only the app-side mitigation.
+The validator now:
 
-## Protocol notes
-- **Parked = permanent** without a new explicit Peter decision + a different approach (A, B, GATE-3 fix; D2 separately).
-- Exactly one final check per chain; no correction loops.
-- Worker silent-exit rule: verify no mutation, do not re-dispatch blindly.
-- Docs pushed to GitHub through `eeb1584`.
+- opens a confined regular candidate file under a safe run ID;
+- records and independently rechecks exact stored bytes, SHA-256, file identity,
+  `mtime_ns`, artifact/run identity, and source offsets;
+- recomputes boundary acceptance from current disk bytes and locked truth;
+- rejects missing/malformed artifacts, wrong offsets, wrong digest, timestamp
+  changes, forged all-PASS fields, path traversal, and symlinked run roots; and
+- requires explicit distinct fixture selection and exactly one selected,
+  validator-recomputed current run.
 
-## Evidence pointers (private, consent-controlled)
-- `/mnt/user/automulticam/ai-gpu-1-acceptance/20260813-live-window/` — worker results, review manifests.
-- `/mnt/user/automulticam/ai-gpu-1-acceptance/20260814-live-window-gate4/` — `browser-review.json`, `coexistence-summary.json`, `gpu-samples.csv`, `run.log`.
-- Board cards: `t_3d25e9ea` (A), `t_d8dffaa4` (B), `t_85c5cd26` (GATE-3 fix), `t_04f4a59e` / `t_fe9c14a5` (A-Gate1 check), `t_31613627` (fix implementation).
+### W3 — Package B: complete-set transaction and UI redesign locally PASS
+
+- Added `PUT /projects/{id}/speaker-confirmations/batch`.
+- The request must contain every current anonymous voice exactly once.
+- Full speaker/camera bijection, evidence, artifact version, and optimistic
+  versions are checked before mutation.
+- Existing rows require an exact optimistic version; fresh-run rows require no
+  stale version.
+- The complete current-version set is replaced in one DB transaction.
+- One-row swaps now fail closed; the legacy endpoint cannot manufacture the
+  other half of a swap.
+- Uniqueness is scoped to `(project, source_artifact_version, identity)` so stale
+  prior-run confirmations remain immutable audit history without blocking a
+  fresh run.
+- UI exposes one **Save all confirmed mappings** action, disabled until every
+  row is complete, has at least two snippets, is acknowledged, and the whole
+  selection is bijective.
+- Suggestions are not silently preselected as authority.
+
+Commit `080784f` remains superseded and must not be deployed.
+
+### W4 — Package A Gate-1 direct compliance check: PASS
+
+The obsolete worker checks targeted the abandoned trust-token architecture. The
+replacement was checked directly against the redesigned boundary:
+
+- explicit distinct fixture selection;
+- validator-owned on-disk artifact authority; and
+- exactly one validator-recomputed selected current run.
+
+The direct Package A tests are part of the final green repository snapshot.
+
+### W5 — D2/GATE-4: observer half rebuilt and locally PASS
+
+D2 is no longer an executor capable of manufacturing its own authority.
+
+Implemented:
+
+- file-only `scripts/gate4_observer.py`;
+- exact rendered-Compose and candidate metadata binding;
+- append-only event chain authenticated with an external HMAC key not stored in
+  evidence;
+- authentication before semantic interpretation;
+- required phase order/coverage and continuous GPU sampling;
+- per-process GPU accounting, Dots output-mtime stability, real overlap/output
+  observations, health/restart/Ollama checks, and cleanup/preservation checks;
+- explicit rejection of caller verdict/all-PASS fields; and
+- queue concurrency fixed at exactly one in code and Compose topology.
+
+The legacy offline harness remains a mock/schema regression harness; its live
+`--execute` path remains intentionally disabled.
+
+**Boundary not implemented here:** a trusted-host collector that launches the
+already-authorized live workload and emits the signed observations. That
+collector remains a separate authorization/operations surface. The WebUI
+container also lacks Docker Compose, so no real final Compose render was claimed
+from this environment. The previous manual GATE-4 PASS remains authoritative.
+
+### W6 — Live-window technical debt: implemented and locally PASS
+
+- **W6.1 MySQL `/cuts`:** exact `(project_id, created_at, id)` index plus
+  per-connection `SET SESSION sort_buffer_size=16 MiB`; no shared-server
+  `SET GLOBAL` dependency. Compose and `.env.example` expose
+  `DB_SORT_BUFFER_SIZE`.
+- **W6.2 GPU accounting:** used-column values are cross-checked against
+  per-process allocations; discrepancies above 20% are retained as auditable
+  anomalies, while headroom uses the per-process sum when available.
+- **W6.3 test isolation:** the repository suite pins `OLLAMA_BASE_URL=''` and
+  `LLM_MODEL=''`; MySQL helpers do the same. Explicit LLM tests may still opt in.
+- **W6.4 Dots completion:** API `completed` alone is insufficient; completion
+  requires a post-submit, non-empty output generation stable across two polls.
+- **W6.5 diarization continuation:** conservative embedding continuation requires
+  minimum similarity, margin, and bounded gap; it refuses relabeling on overlap,
+  ambiguity, long gaps, or missing embeddings; preserves provenance; and strips
+  private embeddings from returned turns.
+
+## Final local verification
+
+Final snapshot commands were run with isolated temporary prerequisites on PATH:
+Node 22.14.0 and static FFmpeg/FFprobe 7.0.2.
+
+- Full pinned suite: **895 passed, 3 skipped**.
+  - two skips: `AUTOEDIT_GOLDEN_MEDIA_ROOT` is not configured;
+  - one skip: central MySQL integration credentials are not configured.
+- Redesigned cross-package suite: **216 passed**.
+- Focused security/atomicity suite after final adversarial fixes: **41 passed**.
+- `tests/speaker_mapping_logic.test.mjs`: PASS.
+- `tests/player_logic.test.mjs`: PASS.
+- Node syntax checks for changed JavaScript: PASS.
+- Ruff over changed Python: PASS.
+- Python compileall: PASS.
+- `git diff --check`: PASS.
+- MySQL shell helper syntax: PASS.
+- Real final Compose render: **NOT RUN — Docker Compose unavailable in this
+  WebUI container**; static topology/observer regressions pass.
+
+## Release boundary / next actions
+
+1. Review the pushed exact commit and migration plan on the deployment host.
+   The commit excludes pre-existing dashboard/browser artifacts and local Hermes
+   helper/log files.
+2. Deploy via `scripts/autoedit-deploy.sh` (backup → push → rebuild → verify),
+   retaining production `mock|mock` unless a separately authorized rollout says
+   otherwise.
+3. Run a real rendered-Compose check on the deployment host.
+4. Regenerate the GATE-3 candidate from existing accepted inputs and perform
+   Peter's re-review.
+5. Keep a future trusted-host GATE-4 collector separate from the read-only
+   observer and require a fresh bounded live authorization before running it.
+
+## Private evidence pointers
+
+- `/mnt/user/automulticam/ai-gpu-1-acceptance/20260813-live-window/`
+- `/mnt/user/automulticam/ai-gpu-1-acceptance/20260814-live-window-gate4/`
+
+These remain consent-controlled and are not copied into Git.

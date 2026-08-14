@@ -468,7 +468,19 @@ dashboard view is a non-goal and may not weaken the machine contract.
 
 ## 17. Implementation package, ownership, and dependencies
 
-One Programmer worktree owns only:
+The implemented D2 replacement is a split collector/observer design:
+
+- `scripts/gate4_observer.py` is a file-only validator. It cannot run commands,
+  contact Docker/services, launch workloads, unload Ollama, or clean resources.
+- A separately authorized trusted-host collector must render Compose and append
+  boundary observations signed with a chained HMAC key held outside evidence.
+- The observer rejects self-authenticating/all-PASS fields and derives the
+  verdict from authenticated observations, output file mtimes, phase coverage,
+  per-process GPU accounting, health/restarts, and cleanup/mock checks.
+- The legacy `scripts/ai_gpu_acceptance.py` remains an offline/mock schema and
+  fail-closed regression harness; its `--execute` refusal is intentional.
+
+One implementation package owns only:
 
 - `scripts/ai_gpu_acceptance.py` or a narrowly split `scripts/ai_gpu_acceptance/`
   package;

@@ -23,8 +23,46 @@ def run_migrations(engine: Engine) -> None:
                 "ALTER TABLE cuts MODIFY kind "
                 "ENUM('rough','ai','themed','social','manual') NOT NULL"
             ))
+        cut_indexes = {item["name"] for item in inspect(engine).get_indexes("cuts")}
+        if "ix_cuts_project_created_id" not in cut_indexes:
+            with engine.begin() as connection:
+                connection.execute(text(
+                    "CREATE INDEX ix_cuts_project_created_id "
+                    "ON cuts (project_id, created_at, id)"
+                ))
     if "speaker_confirmations" not in inspect(engine).get_table_names():
         speaker_confirmations.create(engine)
+    elif engine.dialect.name == "mysql" and "provenance" not in {
+        column["name"] for column in inspect(engine).get_columns("speaker_confirmations")
+    }:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE speaker_confirmations ADD COLUMN provenance VARCHAR(40) NOT NULL DEFAULT 'confirmed_mapping'"))
+    inspector = inspect(engine)
+    if "speaker_confirmations" in inspector.get_table_names():
+        existing_indexes = {item["name"] for item in inspector.get_indexes("speaker_confirmations")}
+        existing_indexes.update(item["name"] for item in inspector.get_unique_constraints("speaker_confirmations") if item.get("name"))
+        replacement_indexes = (
+            ("uq_confirmation_version_label", "project_id, source_artifact_version, diarizer_speaker_id"),
+            ("uq_confirmation_version_speaker", "project_id, source_artifact_version, speaker_id"),
+            ("uq_confirmation_version_camera", "project_id, source_artifact_version, camera_id"),
+        )
+        # Create the version-scoped replacements before dropping any stricter
+        # legacy indexes. A failed replacement therefore leaves the old safety
+        # boundary intact instead of weakening a partially applied migration.
+        for name, columns in replacement_indexes:
+            if name not in existing_indexes:
+                with engine.begin() as connection:
+                    connection.execute(text(f"CREATE UNIQUE INDEX {name} ON speaker_confirmations ({columns})"))
+                existing_indexes.add(name)
+        obsolete = {
+            "uq_confirmation_project_label",
+            "uq_confirmation_project_speaker",
+            "uq_confirmation_project_camera",
+        }
+        if engine.dialect.name == "mysql":
+            for name in sorted(obsolete.intersection(existing_indexes)):
+                with engine.begin() as connection:
+                    connection.execute(text(f"ALTER TABLE speaker_confirmations DROP INDEX {name}"))
     if "project_cut_selections" not in inspect(engine).get_table_names():
         project_cut_selections.create(engine)
     with engine.begin() as connection:

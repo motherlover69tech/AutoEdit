@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     func,
 )
 
@@ -142,6 +143,7 @@ cuts = Table(
     Column("cdl_json", JSON, nullable=False),
     Column("created_at", DateTime, nullable=False, server_default=func.now()),
     Index("ix_cuts_project_kind_created", "project_id", "kind", "created_at", "id"),
+    Index("ix_cuts_project_created_id", "project_id", "created_at", "id"),
 )
 
 project_cut_selections = Table(
@@ -175,12 +177,16 @@ speaker_confirmations = Table(
     Column("speaker_id", String(128), nullable=False),
     Column("camera_id", String(26), ForeignKey("angles.id"), nullable=False),
     Column("status", Enum("confirmed", "unresolved", name="speaker_confirmation_status"), nullable=False),
+    Column("provenance", String(40), nullable=False, server_default="confirmed_mapping"),
     Column("operator_id", String(128), nullable=False),
     Column("confirmed_at", DateTime, nullable=False),
     Column("source_run_id", String(128), nullable=False),
     Column("source_artifact_version", String(128), nullable=False),
     Column("evidence_turn_ids", JSON, nullable=False),
     Column("version", Integer, nullable=False, server_default="1"),
+    UniqueConstraint("project_id", "source_artifact_version", "diarizer_speaker_id", name="uq_confirmation_version_label"),
+    UniqueConstraint("project_id", "source_artifact_version", "speaker_id", name="uq_confirmation_version_speaker"),
+    UniqueConstraint("project_id", "source_artifact_version", "camera_id", name="uq_confirmation_version_camera"),
     Index("ix_speaker_confirmations_project_label", "project_id", "diarizer_speaker_id"),
     Index("ix_speaker_confirmations_project_speaker", "project_id", "speaker_id"),
 )

@@ -17,10 +17,31 @@ class GPUSample:
     used_mib: int
     phase: str
     processes: tuple[str, ...] = ()
+    process_used_mib: tuple[int, ...] = ()
 
     @property
     def free_mib(self) -> int:
-        return self.total_mib - self.used_mib
+        return self.total_mib - self.effective_used_mib
+
+    @property
+    def process_sum_mib(self) -> int | None:
+        return sum(self.process_used_mib) if self.process_used_mib else None
+
+    @property
+    def accounting_discrepancy_ratio(self) -> float:
+        process_sum = self.process_sum_mib
+        if process_sum is None or process_sum == 0:
+            return 0.0 if self.used_mib == 0 else 1.0
+        return abs(self.used_mib - process_sum) / process_sum
+
+    @property
+    def accounting_anomaly(self) -> bool:
+        return self.process_sum_mib is not None and self.accounting_discrepancy_ratio > 0.20
+
+    @property
+    def effective_used_mib(self) -> int:
+        """Use per-process allocations when supplied; GPU used is a cross-check."""
+        return self.process_sum_mib if self.process_sum_mib is not None else self.used_mib
 
 
 def validate_sampling(samples: Iterable[GPUSample], *, max_interval_ms: int = 500) -> tuple[GPUSample, ...]:
@@ -31,6 +52,13 @@ def validate_sampling(samples: Iterable[GPUSample], *, max_interval_ms: int = 50
     for sample in ordered:
         if sample.total_mib <= 0 or sample.used_mib < 0 or sample.used_mib > sample.total_mib:
             raise ValueError("GPU sample memory values are invalid")
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 0
+            for value in sample.process_used_mib
+        ):
+            raise ValueError("per-process GPU memory values are invalid")
+        if sample.process_sum_mib is not None and sample.process_sum_mib > sample.total_mib:
+            raise ValueError("per-process GPU memory exceeds device total")
         if not sample.phase:
             raise ValueError("GPU sample phase is required")
     for previous, current in zip(ordered, ordered[1:]):
@@ -54,7 +82,7 @@ def summarize_gpu_acceptance(
     total = checked[0].total_mib
     if any(sample.total_mib != total for sample in checked):
         raise ValueError("GPU total memory changed during measurement")
-    peak = max(checked, key=lambda sample: sample.used_mib)
+    peak = max(checked, key=lambda sample: sample.effective_used_mib)
     minimum_free = min(sample.free_mib for sample in checked)
     threshold = max(required_headroom_mib, (total + 9) // 10)
     failures = tuple(str(item) for item in workload_failures if item)
@@ -62,13 +90,18 @@ def summarize_gpu_acceptance(
     return {
         "verdict": "PASS" if verdict else "FAIL",
         "total_mib": total,
-        "peak_used_mib": peak.used_mib,
+        "peak_used_mib": peak.effective_used_mib,
+        "used_column_peak_mib": max(sample.used_mib for sample in checked),
         "minimum_free_mib": minimum_free,
         "required_headroom_mib": threshold,
         "peak_phase": peak.phase,
         "sample_count": len(checked),
         "unknown_processes": bool(unknown_processes),
         "workload_failures": list(failures),
+        "used_process_discrepancy_count": sum(sample.accounting_anomaly for sample in checked),
+        "samples_with_accounting_anomaly": [
+            index for index, sample in enumerate(checked) if sample.accounting_anomaly
+        ],
     }
 
 

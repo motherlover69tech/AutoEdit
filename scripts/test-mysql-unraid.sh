@@ -19,4 +19,4 @@ if [[ -z "$MYSQL_PASSWORD" ]]; then
 fi
 
 export AUTOEDIT_MYSQL_TEST_URL="mysql+pymysql://autoedit:${MYSQL_PASSWORD}@127.0.0.1:${LOCAL_PORT}/autoedit"
-env -u VIRTUAL_ENV uv run pytest tests/test_mysql_integration.py -q
+OLLAMA_BASE_URL='' LLM_MODEL='' env -u VIRTUAL_ENV uv run pytest tests/test_mysql_integration.py -q

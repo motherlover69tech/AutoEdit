@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 from datetime import datetime, timezone
@@ -23,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, Strict
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 SafeId = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")]
 Ms = StrictInt
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 def _aware(value: datetime) -> datetime:
@@ -422,14 +424,14 @@ class BoundaryEvaluation(StrictModel):
 
 
 class RunEvidence(StrictModel):
-    """Redacted, hash-bound evidence required for a trusted acceptance run.
+    """Portable observations from one run; never acceptance authority.
 
-    A passing run must bind exactly one validated candidate ``AIResultArtifact``.
-    The candidate identity, content hash, relative path, and source offsets are
-    recorded so the comparison cannot be satisfied by truth-shaped evidence that
-    never proved a real artifact.
+    Version 2 deliberately contains no claimed status, gate results, digest, or
+    construction proof. ``validate_fixture`` reopens the candidate under the
+    validator-controlled root and independently recomputes every acceptance
+    property from its bytes and locked truth.
     """
-    schema_version: Literal["1.0"]
+    schema_version: Literal["2.0"]
     fixture_id: SafeId
     fixture_revision: StrictInt = Field(gt=0)
     manifest_sha256: Sha256
@@ -444,19 +446,14 @@ class RunEvidence(StrictModel):
     fps_num: StrictInt = Field(gt=0)
     fps_den: StrictInt = Field(gt=0)
     sync_offsets_ms: dict[SafeId, StrictInt] = Field(min_length=1)
-    commands: list[SafeId] = Field(min_length=1)
-    results: list[Literal["PASS", "FAIL", "BLOCKED", "UNAVAILABLE"]] = Field(min_length=1)
-    gate_status: dict[SafeId, Literal["PASS", "FAIL", "BLOCKED", "UNAVAILABLE"]]
-    peter_decisions: dict[SafeId, Literal["PASS", "FAIL", "BLOCKED", "UNAVAILABLE"]] = Field(min_length=5)
-    boundary_evaluations: list[BoundaryEvaluation] = Field(min_length=3)
-    selected_word_ids: list[SafeId] = Field(min_length=3)
-    # Candidate artifact binding (BUG-AIGPU1-001): a passing run proves a real,
+    # Candidate artifact binding (BUG-AIGPU1-001): acceptance is recomputed
+    # from this on-disk file; these observations do not claim a verdict.
     # validated AIResultArtifact was compared, not only truth-shaped numbers.
     candidate_artifact_id: SafeId
     candidate_artifact_sha256: Sha256
     candidate_artifact_relative_path: str
+    candidate_artifact_mtime_ns: StrictInt = Field(gt=0)
     candidate_source_offsets_ms: dict[SafeId, StrictInt] = Field(min_length=1)
-    status: Literal["PASS", "FAIL", "BLOCKED", "UNAVAILABLE"]
 
     @field_validator("candidate_artifact_relative_path")
     @classmethod
@@ -465,32 +462,8 @@ class RunEvidence(StrictModel):
 
     @model_validator(mode="after")
     def complete(self):
-        if len(self.commands) != len(self.results):
-            raise ValueError("run evidence commands/results are incomplete")
-        required = {"consent", "retention", "word_truth", "identity", "editorial"}
-        if set(self.peter_decisions) != required:
-            raise ValueError("current Peter decision scopes are required")
-        required_gates = {"TEST-AIGPU1-001", "TEST-AIGPU1-002", "TEST-AIGPU1-007", "SEC-AIGPU1-001", "SEC-AIGPU1-005"}
-        if set(self.gate_status) != required_gates:
-            raise ValueError("complete gate statuses are required")
-        if self.status == "PASS" and (
-            any(value != "PASS" for value in self.gate_status.values())
-            or any(value != "PASS" for value in self.peter_decisions.values())
-        ):
-            raise ValueError("passing status must be supported by passing gates and decisions")
-        if len(set(self.selected_word_ids)) != len(self.selected_word_ids):
-            raise ValueError("selected words must be unique")
-        if len(self.boundary_evaluations) != len(self.selected_word_ids):
-            raise ValueError("boundary evaluations must equal selected words")
-        # Candidate source offsets must match the fixture channel offsets exactly.
         if self.candidate_source_offsets_ms != self.sync_offsets_ms:
             raise ValueError("candidate source offsets must match fixture manifest offsets")
-        # Every boundary evaluation must reference a selected word and exactly one
-        # candidate-derived evaluation; the predicted times are the candidate's.
-        selected = set(self.selected_word_ids)
-        for item in self.boundary_evaluations:
-            if item.word_id not in selected:
-                raise ValueError("boundary evaluation references an unselected word")
         return self
 
 
@@ -650,20 +623,66 @@ def evaluate_gate_one(*, words: list[WordBoundary], timeline_start_ms: int, time
     return result
 
 
-def build_run_evidence(*, artifact: AIResultArtifact, manifest: Manifest, truth: GroundTruth,
+def _read_run_candidate(
+    runs_root: Path, run_id: str, relative_path: str
+) -> tuple[bytes, os.stat_result, Path]:
+    """Read one confined regular file and detect replacement during the read."""
+    if not isinstance(run_id, str) or not _SAFE_ID.fullmatch(run_id):
+        raise ValueError("run id must be one safe identifier")
+    confined_relative_path(relative_path)
+    run_dir = runs_root / run_id
+    candidate = run_dir / relative_path
+    try:
+        if runs_root.is_symlink() or run_dir.is_symlink() or candidate.is_symlink():
+            raise ValueError("candidate artifact path is linked")
+        resolved_runs = runs_root.resolve(strict=True)
+        resolved_run = run_dir.resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+        if (
+            resolved_run.parent != resolved_runs
+            or not resolved.is_relative_to(resolved_run)
+            or not resolved.is_file()
+        ):
+            raise ValueError("candidate artifact path is not confined")
+        before = resolved.stat()
+        if before.st_nlink != 1 or not stat.S_ISREG(before.st_mode):
+            raise ValueError("candidate artifact must be one regular file")
+        raw = resolved.read_bytes()
+        after = resolved.stat()
+        fingerprint_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        fingerprint_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        if fingerprint_before != fingerprint_after or len(raw) != after.st_size:
+            raise ValueError("candidate artifact changed while being read")
+        return raw, after, resolved
+    except OSError as exc:
+        raise ValueError("candidate artifact is missing or unreadable") from exc
+
+
+def _selected_truth_words(truth: GroundTruth, manifest: Manifest) -> list[WordBoundary]:
+    duration = manifest.project.timeline_end_ms - manifest.project.timeline_origin_ms
+    selected: dict[str, WordBoundary] = {}
+    candidates = [
+        word for word in truth.word_boundaries
+        if word.reviewer_decision == "accepted" and word.uncertainty == "certain" and not word.overlapped
+    ]
+    for word in sorted(candidates, key=lambda item: (item.start_ms, item.word_id)):
+        fraction = (word.start_ms - manifest.project.timeline_origin_ms) / duration
+        third = "first" if fraction < 1 / 3 else "middle" if fraction < 2 / 3 else "final"
+        selected.setdefault(third, word)
+    if set(selected) != {"first", "middle", "final"}:
+        raise ValueError("three reviewed timeline thirds are required")
+    return [selected[third] for third in ("first", "middle", "final")]
+
+
+def build_run_evidence(*, root: Path, manifest: Manifest, truth: GroundTruth,
                        approvals: Approvals, manifest_bytes: bytes, truth_bytes: bytes,
                        run_id: str, source_commit: str, worker_image_digest: str,
                        runtime_version: str, compose_render_sha256: str,
-                       selected_word_ids: list[str],
-                       peter_decisions: dict[str, Literal["PASS", "FAIL", "BLOCKED", "UNAVAILABLE"]],
-                       status: Literal["PASS", "FAIL", "BLOCKED", "UNAVAILABLE"] = "PASS") -> RunEvidence:
-    """Bind a validated candidate artifact to locked truth and build RunEvidence.
+                       candidate_artifact_relative_path: str) -> RunEvidence:
+    """Record observations by opening the immutable candidate under ``root``.
 
-    This is the only supported way to produce a passing ``RunEvidence``.  The
-    candidate is projected through the adapter using exact segment/index identity,
-    the boundary evaluations are recomputed from the real artifact timestamps, and
-    the candidate's hash/path/identity/source-offsets are recorded.  A run that
-    never proved a validated ``AIResultArtifact`` cannot satisfy the schema.
+    The returned object is deliberately not a verdict. Acceptance is established
+    only when ``validate_fixture`` independently reopens and recomputes it.
     """
     mh, th = sha256_bytes(manifest_bytes), sha256_bytes(truth_bytes)
     expected_bundle = bundle_id(manifest_bytes, truth_bytes)
@@ -671,28 +690,26 @@ def build_run_evidence(*, artifact: AIResultArtifact, manifest: Manifest, truth:
             or approvals.manifest_sha256 != mh or approvals.ground_truth_sha256 != th
             or approvals.bundle_id != expected_bundle):
         raise ValueError("fixture/truth/approval hashes do not bind to this run")
-    sync_offsets = {channel.channel_id: channel.sync_offset_ms for channel in manifest.speaker_audio_channels}
-    truth_by_id = {word.word_id: word for word in truth.word_boundaries}
-    selected = [truth_by_id[word_id] for word_id in selected_word_ids if word_id in truth_by_id]
-    if len(selected) != len(selected_word_ids):
-        raise ValueError("selected word id is not in locked truth")
-    # Project the candidate artifact through the adapter: exact segment/index
-    # resolution, cluster coverage, source-offset match, token-digest check.
-    from autoedit.ai.golden_fixture_adapter import artifact_words
-    candidate_offsets = {source.source_id: source.sync_offset_ms for source in artifact.sources}
-    candidate = artifact_words(artifact, selected, source_offsets_ms=candidate_offsets)
-    boundary = evaluate_gate_one(
-        words=selected, predicted_words=candidate,
-        timeline_start_ms=manifest.project.timeline_origin_ms,
-        timeline_end_ms=manifest.project.timeline_end_ms,
-        fps_num=manifest.project.fps_num, fps_den=manifest.project.fps_den, sync_offset_ms=0,
+    raw, file_stat, _path = _read_run_candidate(
+        root / "runs", run_id, candidate_artifact_relative_path
     )
+    try:
+        artifact = AIResultArtifact.model_validate_json(raw)
+    except ValueError as exc:
+        raise ValueError("candidate artifact bytes are not a valid artifact") from exc
+    if artifact.run_id != run_id:
+        raise ValueError("candidate artifact identity does not match run directory")
+    sync_offsets = {
+        channel.channel_id: channel.sync_offset_ms
+        for channel in manifest.speaker_audio_channels
+    }
+    candidate_offsets = {
+        source.source_id: source.sync_offset_ms for source in artifact.sources
+    }
     if candidate_offsets != sync_offsets:
         raise ValueError("candidate source offsets do not match fixture manifest offsets")
-    # The RunEvidence model re-checks that boundary evaluations reference selected
-    # words and candidate offsets equal fixture offsets; here we also bind identity.
     return RunEvidence(
-        schema_version="1.0",
+        schema_version="2.0",
         fixture_id=manifest.fixture_id,
         fixture_revision=manifest.revision,
         manifest_sha256=mh,
@@ -707,38 +724,84 @@ def build_run_evidence(*, artifact: AIResultArtifact, manifest: Manifest, truth:
         fps_num=manifest.project.fps_num,
         fps_den=manifest.project.fps_den,
         sync_offsets_ms=sync_offsets,
-        commands=["fixture_load", "artifact_validate", "gate_one_compare", "evidence_bind"],
-        results=["PASS", "PASS", "PASS", "PASS"],
-        gate_status={
-            "TEST-AIGPU1-001": "PASS", "TEST-AIGPU1-002": "PASS", "TEST-AIGPU1-007": "PASS",
-            "SEC-AIGPU1-001": "PASS", "SEC-AIGPU1-005": "PASS",
-        },
-        peter_decisions=peter_decisions,
-        boundary_evaluations=boundary,
-        selected_word_ids=selected_word_ids,
         candidate_artifact_id=artifact.run_id,
-        candidate_artifact_sha256=sha256_bytes(artifact.model_dump_json().encode()),
-        candidate_artifact_relative_path=artifact.analysis_audio.relative_path,
+        candidate_artifact_sha256=sha256_bytes(raw),
+        candidate_artifact_relative_path=candidate_artifact_relative_path,
+        candidate_artifact_mtime_ns=file_stat.st_mtime_ns,
         candidate_source_offsets_ms=candidate_offsets,
-        status=status,
     )
 
 
-def derive_gate_statuses(*, root_configured: bool, fixture_set_ready: bool,
-                         gate_one_ready: bool, evidence_bound: bool,
-                         consent_ready: bool, restricted_tree: bool) -> dict[str, str]:
-    """Derive scoped statuses; never accept caller-provided PASS claims."""
-    if not root_configured:
-        status = "UNAVAILABLE"
-    else:
-        status = "PASS" if fixture_set_ready else "BLOCKED"
-    return {
-        "TEST-AIGPU1-001": status,
-        "TEST-AIGPU1-002": "PASS" if gate_one_ready and consent_ready else ("UNAVAILABLE" if not root_configured else "BLOCKED"),
-        "TEST-AIGPU1-007": "PASS" if evidence_bound else ("UNAVAILABLE" if not root_configured else "BLOCKED"),
-        "SEC-AIGPU1-001": "PASS" if consent_ready else ("UNAVAILABLE" if not root_configured else "FAIL"),
-        "SEC-AIGPU1-005": "PASS" if restricted_tree else ("UNAVAILABLE" if not root_configured else "FAIL"),
-    }
+def _recompute_run_acceptance(
+    evidence_path: Path,
+    evidence: RunEvidence,
+    manifest: Manifest,
+    truth: GroundTruth,
+    manifest_bytes: bytes,
+    truth_bytes: bytes,
+) -> bool:
+    """Validator-owned authority: recompute acceptance from current disk bytes."""
+    try:
+        mh, th = sha256_bytes(manifest_bytes), sha256_bytes(truth_bytes)
+        if (
+            evidence.fixture_id != manifest.fixture_id
+            or evidence.fixture_revision != manifest.revision
+            or evidence.manifest_sha256 != mh
+            or evidence.ground_truth_sha256 != th
+            or evidence.bundle_id != bundle_id(manifest_bytes, truth_bytes)
+            or evidence.fps_num != manifest.project.fps_num
+            or evidence.fps_den != manifest.project.fps_den
+            or evidence.run_id != evidence_path.parent.name
+        ):
+            return False
+        raw, file_stat, _path = _read_run_candidate(
+            evidence_path.parent.parent,
+            evidence.run_id,
+            evidence.candidate_artifact_relative_path,
+        )
+        if (
+            file_stat.st_mtime_ns != evidence.candidate_artifact_mtime_ns
+            or sha256_bytes(raw) != evidence.candidate_artifact_sha256
+        ):
+            return False
+        artifact = AIResultArtifact.model_validate_json(raw)
+        channel_offsets = {
+            channel.channel_id: channel.sync_offset_ms
+            for channel in manifest.speaker_audio_channels
+        }
+        artifact_offsets = {
+            source.source_id: source.sync_offset_ms for source in artifact.sources
+        }
+        if (
+            artifact.run_id != evidence.candidate_artifact_id
+            or artifact.run_id != evidence.run_id
+            or artifact_offsets != channel_offsets
+            or evidence.sync_offsets_ms != channel_offsets
+            or evidence.candidate_source_offsets_ms != channel_offsets
+        ):
+            return False
+        selected = _selected_truth_words(truth, manifest)
+        from autoedit.ai.golden_fixture_adapter import artifact_words
+        predicted = artifact_words(artifact, selected, source_offsets_ms=channel_offsets)
+        boundary = evaluate_gate_one(
+            words=selected,
+            predicted_words=predicted,
+            timeline_start_ms=manifest.project.timeline_origin_ms,
+            timeline_end_ms=manifest.project.timeline_end_ms,
+            fps_num=manifest.project.fps_num,
+            fps_den=manifest.project.fps_den,
+        )
+        return (
+            len(boundary) == 3
+            and len({item.anonymous_cluster_id for item in boundary if item.anonymous_cluster_id}) >= 2
+            and all(
+                item.start_error_ms <= item.frame_tolerance_ms
+                and item.end_error_ms <= item.frame_tolerance_ms
+                for item in boundary
+            )
+        )
+    except (KeyError, OSError, TypeError, ValueError):
+        return False
 
 
 def validate_fixture(root: Path, fixture_id: str, *, require_evidence: bool = True) -> dict:
@@ -872,41 +935,27 @@ def validate_fixture(root: Path, fixture_id: str, *, require_evidence: bool = Tr
         if require_evidence and not evidence_paths:
             errors.append("GOLD_EVIDENCE_MISSING")
         evidence = None
-        for evidence_path in evidence_paths:
+        evidence_source_path: Path | None = None
+        for evidence_path in sorted(evidence_paths):
             try:
                 candidate = RunEvidence.model_validate_json(evidence_path.read_bytes())
-            except (OSError, ValueError):
+            except (OSError, ValueError, TypeError):
                 continue
             if candidate.fixture_id == fixture_id and candidate.run_id == evidence_path.parent.name:
                 evidence = candidate
+                evidence_source_path = evidence_path
                 break
-        if require_evidence and evidence is None:
+        if require_evidence and (evidence is None or evidence_source_path is None):
             errors.append("GOLD_EVIDENCE_STALE")
-        elif evidence is not None:
-            expected_bundle = bundle_id(manifest_bytes, truth_bytes)
-            if (evidence.fixture_revision != manifest.revision
-                    or evidence.manifest_sha256 != mh or evidence.ground_truth_sha256 != th
-                    or evidence.bundle_id != expected_bundle
-                    or evidence.fps_num != manifest.project.fps_num or evidence.fps_den != manifest.project.fps_den
-                    or evidence.status != "PASS"
-                    or any(result != "PASS" for result in evidence.results)
-                    or len(evidence.selected_word_ids) != 3
-                    or len(evidence.boundary_evaluations) != 3
-                    or {item.word_id for item in evidence.boundary_evaluations} != set(evidence.selected_word_ids)
-                    or len({item.anonymous_cluster_id for item in evidence.boundary_evaluations if item.anonymous_cluster_id}) < 2
-                    or any(item.start_error_ms > item.frame_tolerance_ms or item.end_error_ms > item.frame_tolerance_ms for item in evidence.boundary_evaluations)):
-                errors.append("GOLD_EVIDENCE_STALE")
-            truth_words = {word.word_id: word for word in truth.word_boundaries}
-            channel_offsets = {channel.channel_id: channel.sync_offset_ms for channel in manifest.speaker_audio_channels}
-            if (set(evidence.selected_word_ids) - set(truth_words)
-                    or any(item.word_id not in truth_words for item in evidence.boundary_evaluations)
-                    or evidence.sync_offsets_ms != channel_offsets
-                    or any(item.word_id != truth_words[item.word_id].word_id
-                           or item.reviewed_start_ms != truth_words[item.word_id].reviewed_start_ms
-                           or item.reviewed_end_ms != truth_words[item.word_id].reviewed_end_ms
-                           or item.start_error_ms != abs(item.predicted_start_ms - item.reviewed_start_ms)
-                           or item.end_error_ms != abs(item.predicted_end_ms - item.reviewed_end_ms)
-                           for item in evidence.boundary_evaluations)):
+        elif evidence is not None and evidence_source_path is not None:
+            if not _recompute_run_acceptance(
+                evidence_source_path,
+                evidence,
+                manifest,
+                truth,
+                manifest_bytes,
+                truth_bytes,
+            ):
                 errors.append("GOLD_EVIDENCE_STALE")
         decisions = (approvals.rights_and_consent_decision, approvals.retention_and_backup_decision,
                      *approvals.speaker_identity_decisions, *approvals.word_truth_decisions,
@@ -933,6 +982,39 @@ def evaluate_fixture_set(root: Path, fixture_ids: list[str]) -> dict:
         packages=len(results),
         ready_packages=sum(bool(result["valid"]) for result in results),
     )
+
+
+def evaluate_current_run(root: Path, fixture_id: str, run_id: str) -> bool:
+    """Accept only one validator-recomputed run, explicitly selected by ID."""
+    if not run_id or not isinstance(run_id, str):
+        return False
+    if not validate_fixture(root, fixture_id, require_evidence=True)["valid"]:
+        return False
+    try:
+        package = (root / "fixtures" / fixture_id).resolve(strict=True)
+        manifest_bytes = (package / "fixture.manifest.json").read_bytes()
+        truth_bytes = (package / "ground_truth.json").read_bytes()
+        manifest = Manifest.model_validate_json(manifest_bytes)
+        truth = GroundTruth.model_validate_json(truth_bytes)
+        runs_root = (root / "runs").resolve(strict=True)
+    except (OSError, ValueError):
+        return False
+    valid_run_ids: list[str] = []
+    for run_dir in sorted(runs_root.iterdir()):
+        evidence_path = run_dir / "run-evidence.json"
+        if not _private_evidence_path(evidence_path, runs_root):
+            continue
+        try:
+            evidence = RunEvidence.model_validate_json(evidence_path.read_bytes())
+        except (OSError, ValueError):
+            continue
+        if evidence.fixture_id != fixture_id:
+            continue
+        if _recompute_run_acceptance(
+            evidence_path, evidence, manifest, truth, manifest_bytes, truth_bytes
+        ):
+            valid_run_ids.append(evidence.run_id)
+    return valid_run_ids == [run_id]
 
 
 def synthetic_fixture() -> tuple[dict, dict]:

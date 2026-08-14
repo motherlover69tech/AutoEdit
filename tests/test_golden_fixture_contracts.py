@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,10 @@ from autoedit.ai.golden_fixture import (
     WordBoundary,
     bundle_id,
     build_run_evidence,
+    sha256_bytes,
     confined_relative_path,
+    evaluate_current_run,
+    evaluate_fixture_set,
     evaluate_gate_one,
     redacted_result,
     synthetic_cdl,
@@ -308,60 +312,178 @@ def _candidate_artifact(offsets: dict[str, int] | None = None):
     })
 
 
-def test_run_evidence_binds_real_candidate_artifact_and_actual_comparison():
-    """BUG-AIGPU1-001: evidence must bind a validated AIResultArtifact candidate."""
-    from autoedit.ai.golden_fixture import sha256_bytes
-    manifest, truth, approvals = _consent_real_bundle()
-    manifest = Manifest.model_validate(manifest)
-    truth = GroundTruth.model_validate(truth)
-    approvals = Approvals.model_validate(approvals)
+def _on_disk_bundle(tmp_path: Path, *, artifact: AIResultArtifact | None = None):
+    manifest_data, truth_data, approvals_data = _consent_real_bundle()
+    manifest = Manifest.model_validate(manifest_data)
+    truth = GroundTruth.model_validate(truth_data)
+    approvals = Approvals.model_validate(approvals_data)
     manifest_bytes = manifest.model_dump_json().encode()
     truth_bytes = truth.model_dump_json().encode()
-    mh, th = sha256_bytes(manifest_bytes), sha256_bytes(truth_bytes)
-    truth.manifest_sha256 = mh  # type: ignore[attr-defined]
-    approvals.manifest_sha256 = mh  # type: ignore[attr-defined]
-    approvals.ground_truth_sha256 = th  # type: ignore[attr-defined]
-    approvals.bundle_id = bundle_id(manifest_bytes, truth_bytes)  # type: ignore[attr-defined]
-    artifact = _candidate_artifact()
-    evidence = build_run_evidence(
-        artifact=artifact, manifest=manifest, truth=truth, approvals=approvals,
-        manifest_bytes=manifest_bytes, truth_bytes=truth_bytes, run_id="run_7",
-        source_commit="commit_abc", worker_image_digest="4" * 64, runtime_version="py3.13",
-        compose_render_sha256="5" * 64, selected_word_ids=["w_first", "w_middle", "w_final"],
-        peter_decisions={"consent": "PASS", "retention": "PASS", "word_truth": "PASS", "identity": "PASS", "editorial": "PASS"},
-    )
-    assert isinstance(evidence, RunEvidence)
-    assert evidence.candidate_artifact_id == "candidate_run_7"
-    assert evidence.candidate_artifact_sha256 == sha256_bytes(artifact.model_dump_json().encode())
-    assert evidence.candidate_artifact_relative_path == "audio/analysis.wav"
-    assert evidence.candidate_source_offsets_ms == {"channel_1": 120, "channel_2": -80}
-    assert [item.word_id for item in evidence.boundary_evaluations] == ["w_first", "w_middle", "w_final"]
-    assert all(item.start_error_ms == item.end_error_ms == 0 for item in evidence.boundary_evaluations)
-    # Schema rejects evidence that drops the candidate binding.
-    with pytest.raises(ValidationError):
-        RunEvidence.model_validate({**evidence.model_dump(), "candidate_artifact_id": None})
+    truth.manifest_sha256 = sha256_bytes(manifest_bytes)
+    approvals.manifest_sha256 = sha256_bytes(manifest_bytes)
+    approvals.ground_truth_sha256 = sha256_bytes(truth_bytes)
+    approvals.bundle_id = bundle_id(manifest_bytes, truth_bytes)
+    artifact = artifact or _candidate_artifact()
+    run_id = artifact.run_id
+    artifact_path = tmp_path / "runs" / run_id / "artifacts" / "candidate.json"
+    artifact_path.parent.mkdir(parents=True)
+    artifact_path.write_text(artifact.model_dump_json())
+    kwargs = {
+        "root": tmp_path,
+        "manifest": manifest,
+        "truth": truth,
+        "approvals": approvals,
+        "manifest_bytes": manifest_bytes,
+        "truth_bytes": truth_bytes,
+        "run_id": run_id,
+        "source_commit": "commit_abc",
+        "worker_image_digest": "4" * 64,
+        "runtime_version": "py3.13",
+        "compose_render_sha256": "5" * 64,
+        "candidate_artifact_relative_path": "artifacts/candidate.json",
+    }
+    return kwargs, artifact_path
 
 
-def test_run_evidence_rejects_wrong_candidate_source_offsets():
-    """BUG-AIGPU1-001: candidate offsets must match the fixture manifest offsets."""
-    from autoedit.ai.golden_fixture import sha256_bytes
-    manifest, truth, approvals = _consent_real_bundle()
-    manifest = Manifest.model_validate(manifest)
-    truth = GroundTruth.model_validate(truth)
-    approvals = Approvals.model_validate(approvals)
-    manifest_bytes = manifest.model_dump_json().encode()
-    truth_bytes = truth.model_dump_json().encode()
-    mh, th = sha256_bytes(manifest_bytes), sha256_bytes(truth_bytes)
-    truth.manifest_sha256 = mh  # type: ignore[attr-defined]
-    approvals.manifest_sha256 = mh  # type: ignore[attr-defined]
-    approvals.ground_truth_sha256 = th  # type: ignore[attr-defined]
-    approvals.bundle_id = bundle_id(manifest_bytes, truth_bytes)  # type: ignore[attr-defined]
+def test_run_evidence_is_built_from_on_disk_candidate_without_authority_fields(tmp_path: Path):
+    kwargs, artifact_path = _on_disk_bundle(tmp_path)
+    evidence = build_run_evidence(**kwargs)
+    payload = evidence.model_dump()
+
+    assert evidence.schema_version == "2.0"
+    assert evidence.candidate_artifact_sha256 == sha256_bytes(artifact_path.read_bytes())
+    assert evidence.candidate_artifact_mtime_ns == artifact_path.stat().st_mtime_ns
+    assert not {"status", "results", "gate_status", "artifact_valid", "evidence_digest", "construction_proof"}.intersection(payload)
+
+
+def test_run_evidence_rejects_nonexistent_or_malformed_on_disk_artifact(tmp_path: Path):
+    kwargs, artifact_path = _on_disk_bundle(tmp_path)
+    artifact_path.unlink()
+    with pytest.raises(ValueError, match="missing|unreadable"):
+        build_run_evidence(**kwargs)
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text("{}")
+    with pytest.raises(ValueError, match="valid artifact"):
+        build_run_evidence(**kwargs)
+
+
+@pytest.mark.parametrize("run_id", ["../outside", "../../outside", "/tmp/outside"])
+def test_run_evidence_rejects_unconfined_run_id_before_filesystem_access(
+    tmp_path: Path, run_id: str
+):
+    kwargs, _artifact_path = _on_disk_bundle(tmp_path)
+    with pytest.raises(ValueError, match="run id"):
+        build_run_evidence(**{**kwargs, "run_id": run_id})
+
+
+def test_run_evidence_rejects_symlinked_runs_root(tmp_path: Path):
+    kwargs, _artifact_path = _on_disk_bundle(tmp_path)
+    runs_root = tmp_path / "runs"
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-runs"
+    runs_root.rename(outside)
+    runs_root.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="linked|confined"):
+        build_run_evidence(**kwargs)
+
+
+def test_run_evidence_rejects_wrong_on_disk_source_offsets(tmp_path: Path):
     artifact = _candidate_artifact(offsets={"channel_1": 999, "channel_2": -80})
+    kwargs, _artifact_path = _on_disk_bundle(tmp_path, artifact=artifact)
     with pytest.raises(ValueError, match="candidate source offsets"):
-        build_run_evidence(
-            artifact=artifact, manifest=manifest, truth=truth, approvals=approvals,
-            manifest_bytes=manifest_bytes, truth_bytes=truth_bytes, run_id="run_8",
-            source_commit="c", worker_image_digest="4" * 64, runtime_version="py3.13",
-            compose_render_sha256="5" * 64, selected_word_ids=["w_first", "w_middle", "w_final"],
-            peter_decisions={"consent": "PASS", "retention": "PASS", "word_truth": "PASS", "identity": "PASS", "editorial": "PASS"},
-        )
+        build_run_evidence(**kwargs)
+
+
+def test_validator_rejects_wrong_stored_byte_digest_and_timestamp(tmp_path: Path):
+    from autoedit.ai.golden_fixture import _recompute_run_acceptance
+
+    kwargs, artifact_path = _on_disk_bundle(tmp_path)
+    evidence = build_run_evidence(**kwargs)
+    evidence_path = artifact_path.parent.parent / "run-evidence.json"
+    evidence_path.write_text(evidence.model_dump_json())
+    assert _recompute_run_acceptance(
+        evidence_path, evidence, kwargs["manifest"], kwargs["truth"],
+        kwargs["manifest_bytes"], kwargs["truth_bytes"],
+    ) is True
+
+    wrong_digest = evidence.model_copy(update={"candidate_artifact_sha256": "f" * 64})
+    assert _recompute_run_acceptance(
+        evidence_path, wrong_digest, kwargs["manifest"], kwargs["truth"],
+        kwargs["manifest_bytes"], kwargs["truth_bytes"],
+    ) is False
+
+    stat_before = artifact_path.stat()
+    os.utime(
+        artifact_path,
+        ns=(stat_before.st_atime_ns, stat_before.st_mtime_ns + 1_000_000_000),
+    )
+    assert artifact_path.stat().st_mtime_ns != stat_before.st_mtime_ns
+    assert _recompute_run_acceptance(
+        evidence_path, evidence, kwargs["manifest"], kwargs["truth"],
+        kwargs["manifest_bytes"], kwargs["truth_bytes"],
+    ) is False
+
+
+def test_forged_all_pass_fields_are_not_part_of_evidence_contract(tmp_path: Path):
+    kwargs, _artifact_path = _on_disk_bundle(tmp_path)
+    forged = build_run_evidence(**kwargs).model_dump()
+    forged.update({
+        "status": "PASS",
+        "results": ["PASS"],
+        "gate_status": {"TEST-AIGPU1-007": "PASS"},
+        "construction_proof": "public-secret-that-self-authenticates",
+        "artifact_valid": True,
+    })
+    with pytest.raises(ValidationError):
+        RunEvidence.model_validate(forged)
+
+
+def test_fixture_set_requires_explicit_distinct_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        "autoedit.ai.golden_fixture.validate_fixture",
+        lambda *_args, **_kwargs: {
+            "valid": True,
+            "fixture_class": "consent_real",
+            "errors": [],
+            "counts": {},
+        },
+    )
+    assert evaluate_fixture_set(tmp_path, ["a", "b", "c"])["valid"] is True
+    assert evaluate_fixture_set(tmp_path, ["a", "a", "c"])["valid"] is False
+
+
+def test_current_run_requires_one_validator_recomputed_selected_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    kwargs, artifact_path = _on_disk_bundle(tmp_path)
+    package = tmp_path / "fixtures" / "real_fixture"
+    package.mkdir(parents=True)
+    (package / "fixture.manifest.json").write_bytes(kwargs["manifest_bytes"])
+    (package / "ground_truth.json").write_bytes(kwargs["truth_bytes"])
+    evidence = build_run_evidence(**kwargs)
+    evidence_path = artifact_path.parent.parent / "run-evidence.json"
+    evidence_path.write_text(evidence.model_dump_json())
+    for path in (tmp_path / "runs", evidence_path.parent, evidence_path):
+        path.chmod(0o700 if path.is_dir() else 0o600)
+    monkeypatch.setattr(
+        "autoedit.ai.golden_fixture.validate_fixture",
+        lambda *_args, **_kwargs: {"valid": True},
+    )
+    assert evaluate_current_run(tmp_path, "real_fixture", evidence.run_id) is True
+    assert evaluate_current_run(tmp_path, "real_fixture", "other-run") is False
+
+    duplicate_dir = tmp_path / "runs" / "duplicate-run"
+    duplicate_dir.mkdir()
+    duplicate_dir.chmod(0o700)
+    duplicate_artifact = duplicate_dir / "artifacts" / "candidate.json"
+    duplicate_artifact.parent.mkdir()
+    duplicate_artifact.parent.chmod(0o700)
+    duplicate_payload = _candidate_artifact().model_copy(update={"run_id": "duplicate-run"})
+    duplicate_artifact.write_text(duplicate_payload.model_dump_json())
+    duplicate_artifact.chmod(0o600)
+    duplicate_evidence = build_run_evidence(**{**kwargs, "run_id": "duplicate-run"})
+    duplicate_evidence_path = duplicate_dir / "run-evidence.json"
+    duplicate_evidence_path.write_text(duplicate_evidence.model_dump_json())
+    duplicate_evidence_path.chmod(0o600)
+    assert evaluate_current_run(tmp_path, "real_fixture", evidence.run_id) is False

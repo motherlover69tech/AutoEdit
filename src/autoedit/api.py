@@ -34,7 +34,14 @@ from autoedit.auth import (
     parse_session_token,
     verify_password,
 )
-from autoedit.ai.speaker_confirmation import ArtifactValidationError, artifact_version, load_artifact, snippets, validate_confirmation_payload
+from autoedit.ai.speaker_confirmation import ArtifactValidationError, artifact_version, load_artifact, snippets, validate_application_confirmation
+from autoedit.ai.speaker_mapping import (
+    ConfirmedSpeakerMapping,
+    PriorConfirmedSpeaker,
+    SpeakerIdentityEvidence,
+    resolve_speaker_mappings,
+)
+from autoedit.ai.contracts import DiarizationTurn
 from autoedit.ai.activity_from_turns import ArtifactImportError, activity_from_turns, import_artifact
 from autoedit.ai.artifacts import AIArtifactStore
 from autoedit.activity import compute_activity_timeline
@@ -45,6 +52,7 @@ from autoedit.cdl_validator import frame_boundary_ms, ms_to_frames as cdl_ms_to_
 from autoedit.cut_engine import DEFAULT_CUT_PARAMS, _with_shot_reason, generate_cdl
 from autoedit.cut_selection import resolve_selected_cut
 from autoedit.db.migrate import run_migrations
+from autoedit.db.runtime import configure_mysql_session
 from autoedit.db.schema import (
     angles,
     audio_channels,
@@ -104,6 +112,7 @@ def _confirmed_effective_turns(
     raw_turns: Sequence[Mapping[str, Any]],
     artifact_turns: Sequence[Mapping[str, Any]],
     confirmations: Mapping[str, Any],
+    aligned_words: Sequence[Mapping[str, Any]] = (),
 ) -> list[dict]:
     """Project raw turns using only the current confirmation authority."""
     authoritative_by_source: dict[str, Mapping[str, Any]] = {}
@@ -140,6 +149,15 @@ def _confirmed_effective_turns(
             "confidence": timing.get("confidence"),
             "mapping_status": "confirmed" if confirmation is not None else "unresolved",
             "provenance": "confirmed_mapping" if confirmation is not None else None,
+            "aligned_words": [
+                word
+                for word in aligned_words
+                if isinstance(word, Mapping)
+                and isinstance(word.get("start_ms"), int)
+                and isinstance(word.get("end_ms"), int)
+                and word["start_ms"] < int(timing["end_ms"])
+                and word["end_ms"] > int(timing["start_ms"])
+            ],
         })
     return effective
 
@@ -289,6 +307,24 @@ class SpeakerConfirmationRequest(BaseModel):
     expected_version: int | None = Field(default=None, ge=1, strict=True)
 
 
+class SpeakerConfirmationBatchItem(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    diarizer_speaker_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    speaker_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    camera_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=26, max_length=26)]
+    evidence_turn_ids: list[Annotated[str, StringConstraints(min_length=1, max_length=128)]] = Field(min_length=2)
+    expected_version: int | None = Field(default=None, ge=1, strict=True)
+
+
+class SpeakerConfirmationBatchRequest(BaseModel):
+    model_config = ConfigDict(strict=True)
+
+    source_run_id: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    source_artifact_version: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)]
+    mappings: list[SpeakerConfirmationBatchItem] = Field(min_length=1)
+
+
 def _public_origin(public_domain: str | None) -> str | None:
     if not public_domain:
         return None
@@ -341,6 +377,9 @@ def create_app(
 ) -> FastAPI:
     settings = Settings()
     app_engine = engine or create_engine(settings.sqlalchemy_url)
+    configure_mysql_session(
+        app_engine, sort_buffer_size=settings.db_sort_buffer_size
+    )
     app_data_root = Path(data_root) if data_root is not None else settings.data_root
 
     app_auth_enabled = settings.auth_enabled if auth_enabled is None else auth_enabled
@@ -1136,6 +1175,92 @@ def create_app(
             return None
         return f"/projects/{project_id}/media/{kind}/{filename}"
 
+    def _speaker_resolution(
+        artifact: dict,
+        rows: list,
+        current_version: str,
+        pending: ConfirmedSpeakerMapping | Sequence[ConfirmedSpeakerMapping] | None = None,
+    ):
+        turns = [DiarizationTurn.model_validate(item) for item in artifact.get("diarization_turns", [])]
+        evidence = []
+        for item in artifact.get("speaker_mappings", []):
+            if item.get("status") not in {"suggested", "confirmed"} or not item.get("speaker_id"):
+                continue
+            turn_ids = list(item.get("evidence_turn_ids") or [])
+            # The resolver's threshold is deliberately based on independent
+            # evidence records, not one record containing an arbitrary list of
+            # turns.  Keep each current turn auditable and let the policy count
+            # both records and distinct turns.
+            for turn_id in turn_ids:
+                evidence.append(SpeakerIdentityEvidence(
+                    evidence_id=f"artifact-{item['diarizer_speaker_id']}-{item['speaker_id']}-{turn_id}",
+                    kind="voice", diarizer_speaker_id=str(item["diarizer_speaker_id"]),
+                    candidate_speaker_id=str(item["speaker_id"]), source_turn_ids=[turn_id],
+                    confidence=float(item.get("confidence") or 0.0), detail="current artifact voice evidence",
+                ))
+        confirmed = [ConfirmedSpeakerMapping(
+            diarizer_speaker_id=str(row._mapping["diarizer_speaker_id"]), speaker_id=str(row._mapping["speaker_id"]),
+            operator_id=str(row._mapping["operator_id"]), source_run_id=str(row._mapping["source_run_id"]),
+            source_artifact_version=str(row._mapping["source_artifact_version"]),
+            evidence_turn_ids=list(row._mapping["evidence_turn_ids"] or []),
+        ) for row in rows if row._mapping["source_artifact_version"] == current_version]
+        pending_items = (
+            [] if pending is None
+            else [pending] if isinstance(pending, ConfirmedSpeakerMapping)
+            else list(pending)
+        )
+        if pending_items:
+            pending_labels = {item.diarizer_speaker_id for item in pending_items}
+            confirmed = [item for item in confirmed if item.diarizer_speaker_id not in pending_labels]
+            confirmed.extend(pending_items)
+        for pending_item in pending_items:
+            for turn_id in pending_item.evidence_turn_ids:
+                evidence.append(SpeakerIdentityEvidence(
+                    evidence_id=f"operator-{pending_item.diarizer_speaker_id}-{pending_item.speaker_id}-{turn_id}",
+                    kind="voice", diarizer_speaker_id=pending_item.diarizer_speaker_id,
+                    candidate_speaker_id=pending_item.speaker_id, source_turn_ids=[turn_id],
+                    confidence=1.0, detail="operator confirmation current voice evidence",
+                ))
+        historical_rows = [
+            row._mapping
+            for row in rows
+            if row._mapping["source_artifact_version"] != current_version
+        ]
+        observed_labels = {turn.diarizer_speaker_id for turn in turns}
+        historical_by_version: dict[str, list[Mapping[str, Any]]] = {}
+        for item in historical_rows:
+            historical_by_version.setdefault(
+                str(item["source_artifact_version"]), []
+            ).append(item)
+        complete_versions = {
+            version: items
+            for version, items in historical_by_version.items()
+            if {str(item["diarizer_speaker_id"]) for item in items}
+            == observed_labels
+            and len({str(item["speaker_id"]) for item in items}) == len(items)
+        }
+        prior_version = (
+            max(
+                complete_versions,
+                key=lambda version: (
+                    max(item["confirmed_at"] for item in complete_versions[version]),
+                    version,
+                ),
+            )
+            if complete_versions
+            else None
+        )
+        priors = [
+            PriorConfirmedSpeaker(
+                speaker_id=str(item["speaker_id"]),
+                prior_diarizer_speaker_id=str(item["diarizer_speaker_id"]),
+            )
+            for item in complete_versions.get(prior_version, [])
+        ]
+        return resolve_speaker_mappings(
+            turns, evidence=evidence, confirmed=confirmed, prior_confirmed=priors
+        )
+
     @app.get("/projects/{project_id}/speaker-confirmations")
     def get_speaker_confirmations(project_id: str) -> dict:
         project = get_project_record(app_engine, project_id)
@@ -1155,6 +1280,11 @@ def create_app(
             camera_rows = session.execute(select(angles).where(angles.c.project_id == project_id)).all()
             speaker_rows = session.execute(select(audio_channels).where(audio_channels.c.project_id == project_id)).all()
             rows = session.execute(select(speaker_confirmations).where(speaker_confirmations.c.project_id == project_id)).all()
+        try:
+            resolution = _speaker_resolution(artifact, rows, current_version)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise HTTPException(status_code=422, detail=f"speaker resolution unavailable: {exc}") from exc
+        resolved_by_label = {item.diarizer_speaker_id: item for item in resolution.mappings}
         cameras = [{"id": row._mapping["id"], "label": row._mapping["label"], "role": row._mapping["role"]} for row in camera_rows]
         camera_ids = {item["id"] for item in cameras}
         suggested_camera_by_speaker = {
@@ -1176,7 +1306,19 @@ def create_app(
             current = next((item for item in confirmations if item["diarizer_speaker_id"] == label and item["is_current"]), None)
             historical = next((item for item in confirmations if item["diarizer_speaker_id"] == label), None)
             suggestion = artifact_mappings.get(label, {})
-            status = current["status"] if current else ("stale" if historical else ("suggested" if suggestion.get("status") == "suggested" else "needs_confirmation"))
+            resolved = resolved_by_label.get(label)
+            status = (current["status"] if current else ("stale" if historical else ("conflict" if resolved is not None and resolved.status == "unresolved" and resolved.evidence else ("suggested" if (resolved is not None and resolved.status == "suggested") or suggestion.get("status") == "suggested" else "needs_confirmation"))))
+            if status == "stale" and resolved is not None and resolved.status == "confirmed":
+                status = "revalidation_required"
+            # Snippets must point at a DB-known playback asset.  There is no
+            # ``video`` media kind; select the mapped camera proxy (wide is a
+            # safe fallback) and use the existing bounded audio URL.
+            suggested_camera = suggestion.get("camera_id") or suggested_camera_by_speaker.get(str(suggestion.get("speaker_id")))
+            snippet_camera_id = suggested_camera if suggested_camera in camera_ids else next((item["id"] for item in cameras if item["role"] == "wide"), None)
+            if snippet_camera_id is None:
+                snippet_camera_id = next((item["id"] for item in cameras), None)
+            proxy_path = next((row._mapping["proxy_path"] for row in camera_rows if row._mapping["id"] == snippet_camera_id), None)
+            video_url = _strict_media_url(project_id, proxy_path, "proxy")
             labels.append({
                 "diarizer_speaker_id": label,
                 "status": status,
@@ -1184,7 +1326,7 @@ def create_app(
                 "suggested_speaker_id": suggestion.get("speaker_id") if status == "suggested" else None,
                 "suggested_camera_id": (suggestion.get("camera_id") or suggested_camera_by_speaker.get(str(suggestion.get("speaker_id")))) if status == "suggested" else None,
                 "confidence": suggestion.get("confidence") if status == "suggested" and isinstance(suggestion.get("confidence"), (int, float)) else None,
-                "snippets": [{**turn, "url": f"/projects/{project_id}/media/audio/program.m4a?start_ms={turn['start_ms']}&end_ms={turn['end_ms']}"} for turn in turns],
+                "snippets": [{**turn, "url": f"/projects/{project_id}/media/audio/program.m4a?start_ms={turn['start_ms']}&end_ms={turn['end_ms']}", "video_url": video_url} for turn in turns],
             })
         return {"artifact_version": current_version, "run_id": current_version, "speakers": stable_speakers, "cameras": cameras, "labels": labels}
 
@@ -1200,9 +1342,22 @@ def create_app(
         if payload.source_run_id != current_version or payload.source_artifact_version != current_version:
             raise HTTPException(status_code=409, detail="stale AI artifact version; reload confirmation panel")
         try:
-            validate_confirmation_payload(artifact=artifact, diarizer_speaker_id=payload.diarizer_speaker_id, speaker_id=payload.speaker_id, camera_id=payload.camera_id, evidence_turn_ids=payload.evidence_turn_ids)
+            with Session(app_engine) as validation_session:
+                project_speaker_ids = {str(row._mapping["speaker_label"]) for row in validation_session.execute(select(audio_channels).where(audio_channels.c.project_id == project_id)).all() if row._mapping["speaker_label"]}
+                existing = validation_session.execute(select(speaker_confirmations).where(speaker_confirmations.c.project_id == project_id)).all()
+            validate_application_confirmation(artifact=artifact, diarizer_speaker_id=payload.diarizer_speaker_id, speaker_id=payload.speaker_id, project_speaker_ids=project_speaker_ids, evidence_turn_ids=payload.evidence_turn_ids)
+            pending = ConfirmedSpeakerMapping(
+                diarizer_speaker_id=payload.diarizer_speaker_id, speaker_id=payload.speaker_id,
+                source_run_id=current_version, source_artifact_version=current_version,
+                evidence_turn_ids=payload.evidence_turn_ids,
+            )
+            resolution = _speaker_resolution(artifact, existing, current_version, pending=pending)
+            resolved = next((item for item in resolution.mappings if item.diarizer_speaker_id == payload.diarizer_speaker_id), None)
+            if resolved is None or resolved.status != "confirmed" or resolved.speaker_id != payload.speaker_id:
+                raise ValueError("speaker mapping resolution did not confirm this current voice")
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            status_code = 409 if "conflict" in str(exc).lower() or "already used" in str(exc).lower() or "did not confirm" in str(exc).lower() else 400
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
         operator = (getattr(request.state, "session", None) or {}).get("user_id") or (getattr(request.state, "session", None) or {}).get("username") or "operator"
         now = datetime.now(UTC).replace(tzinfo=None)
         with Session(app_engine) as session:
@@ -1210,14 +1365,18 @@ def create_app(
             if camera is None:
                 raise HTTPException(status_code=400, detail="camera does not belong to project")
             existing = session.execute(select(speaker_confirmations).where(speaker_confirmations.c.project_id == project_id)).all()
-            current = next((row._mapping for row in existing if row._mapping["diarizer_speaker_id"] == payload.diarizer_speaker_id), None)
+            current_rows = [
+                row._mapping
+                for row in existing
+                if row._mapping["source_artifact_version"] == current_version
+            ]
+            current = next((item for item in current_rows if item["diarizer_speaker_id"] == payload.diarizer_speaker_id), None)
             if payload.expected_version is not None and (current is None or current["version"] != payload.expected_version):
                 raise HTTPException(status_code=409, detail="confirmation changed; reload before saving")
-            for row in existing:
-                item = row._mapping
-                if item["diarizer_speaker_id"] != payload.diarizer_speaker_id and (item["speaker_id"] == payload.speaker_id or item["camera_id"] == payload.camera_id) and item["source_artifact_version"] == current_version:
-                    raise HTTPException(status_code=409, detail="confirmation must be bijective; identity or camera is already used")
-            values = {"project_id": project_id, "diarizer_speaker_id": payload.diarizer_speaker_id, "speaker_id": payload.speaker_id, "camera_id": payload.camera_id, "status": "confirmed", "operator_id": str(operator), "confirmed_at": now, "source_run_id": current_version, "source_artifact_version": current_version, "evidence_turn_ids": payload.evidence_turn_ids, "version": (current["version"] + 1 if current else 1)}
+            conflicts = [item for item in current_rows if item["diarizer_speaker_id"] != payload.diarizer_speaker_id and (item["speaker_id"] == payload.speaker_id or item["camera_id"] == payload.camera_id)]
+            if conflicts:
+                raise HTTPException(status_code=409, detail="confirmation must be bijective; identity or camera is already used")
+            values = {"project_id": project_id, "diarizer_speaker_id": payload.diarizer_speaker_id, "speaker_id": payload.speaker_id, "camera_id": payload.camera_id, "status": "confirmed", "provenance": "confirmed_mapping", "operator_id": str(operator), "confirmed_at": now, "source_run_id": current_version, "source_artifact_version": current_version, "evidence_turn_ids": payload.evidence_turn_ids, "version": (current["version"] + 1 if current else 1)}
             if current:
                 session.execute(speaker_confirmations.update().where(speaker_confirmations.c.id == current["id"]).values(**values))
                 confirmation_id = current["id"]
@@ -1226,6 +1385,168 @@ def create_app(
                 session.execute(speaker_confirmations.insert().values(id=confirmation_id, **values))
             session.commit()
         return {"id": confirmation_id, **values, "confirmed_at": now.isoformat(), "artifact_version": current_version}
+
+    @app.put("/projects/{project_id}/speaker-confirmations/batch")
+    def save_speaker_confirmations_batch(
+        project_id: str, payload: SpeakerConfirmationBatchRequest, request: Request
+    ) -> dict:
+        """Replace the complete current mapping set in one DB transaction."""
+        project = get_project_record(app_engine, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="project not found")
+        artifact = load_artifact(project_root(app_data_root, project_id), strict=False)
+        if artifact is None:
+            raise HTTPException(status_code=400, detail="completed AI artifact not found")
+        current_version = artifact_version(artifact)
+        if (
+            payload.source_run_id != current_version
+            or payload.source_artifact_version != current_version
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="stale AI artifact version; reload confirmation panel",
+            )
+        observed = {
+            str(turn["diarizer_speaker_id"])
+            for turn in artifact.get("diarization_turns", [])
+        }
+        labels = [item.diarizer_speaker_id for item in payload.mappings]
+        speakers = [item.speaker_id for item in payload.mappings]
+        cameras = [item.camera_id for item in payload.mappings]
+        if set(labels) != observed or len(labels) != len(observed):
+            raise HTTPException(
+                status_code=409,
+                detail="batch must contain every current anonymous voice exactly once",
+            )
+        if len(set(speakers)) != len(speakers) or len(set(cameras)) != len(cameras):
+            raise HTTPException(
+                status_code=409,
+                detail="batch must be a complete speaker/camera bijection",
+            )
+        operator = (
+            (getattr(request.state, "session", None) or {}).get("user_id")
+            or (getattr(request.state, "session", None) or {}).get("username")
+            or "operator"
+        )
+        now = datetime.now(UTC).replace(tzinfo=None)
+        with Session(app_engine) as session:
+            project_speaker_ids = {
+                str(row._mapping["speaker_label"])
+                for row in session.execute(
+                    select(audio_channels).where(audio_channels.c.project_id == project_id)
+                ).all()
+                if row._mapping["speaker_label"]
+            }
+            camera_ids = {
+                str(value)
+                for value in session.execute(
+                    select(angles.c.id).where(angles.c.project_id == project_id)
+                ).scalars()
+            }
+            if not set(speakers).issubset(project_speaker_ids) or not set(cameras).issubset(camera_ids):
+                raise HTTPException(status_code=400, detail="speaker or camera does not belong to project")
+            existing_rows = session.execute(
+                select(speaker_confirmations).where(
+                    speaker_confirmations.c.project_id == project_id
+                )
+            ).all()
+            current_existing = {
+                str(row._mapping["diarizer_speaker_id"]): row._mapping
+                for row in existing_rows
+                if row._mapping["source_artifact_version"] == current_version
+            }
+            validated = []
+            pending_mappings = []
+            for item in payload.mappings:
+                current = current_existing.get(item.diarizer_speaker_id)
+                version_mismatch = (
+                    (current is None and item.expected_version is not None)
+                    or (
+                        current is not None
+                        and (
+                            item.expected_version is None
+                            or current["version"] != item.expected_version
+                        )
+                    )
+                )
+                if version_mismatch:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="confirmation changed; reload before saving",
+                    )
+                try:
+                    validate_application_confirmation(
+                        artifact=artifact,
+                        diarizer_speaker_id=item.diarizer_speaker_id,
+                        speaker_id=item.speaker_id,
+                        project_speaker_ids=project_speaker_ids,
+                        evidence_turn_ids=item.evidence_turn_ids,
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                validated.append((item, current))
+                pending_mappings.append(ConfirmedSpeakerMapping(
+                    diarizer_speaker_id=item.diarizer_speaker_id,
+                    speaker_id=item.speaker_id,
+                    source_run_id=current_version,
+                    source_artifact_version=current_version,
+                    evidence_turn_ids=item.evidence_turn_ids,
+                ))
+
+            try:
+                resolution = _speaker_resolution(
+                    artifact, existing_rows, current_version, pending=pending_mappings
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            resolved_by_label = {
+                mapping.diarizer_speaker_id: mapping for mapping in resolution.mappings
+            }
+            if any(
+                resolved_by_label.get(item.diarizer_speaker_id) is None
+                or resolved_by_label[item.diarizer_speaker_id].status != "confirmed"
+                or resolved_by_label[item.diarizer_speaker_id].speaker_id != item.speaker_id
+                for item in payload.mappings
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="complete batch did not resolve every current voice",
+                )
+
+            # No flush occurs before every invariant above succeeds. Delete and
+            # reinsert the complete set under one transaction, so unique indexes
+            # never observe the intermediate half of a two-row swap.
+            session.execute(
+                speaker_confirmations.delete().where(
+                    speaker_confirmations.c.project_id == project_id,
+                    speaker_confirmations.c.source_artifact_version == current_version,
+                )
+            )
+            response_rows = []
+            for item, current in validated:
+                confirmation_id = current["id"] if current is not None else new_ulid()
+                values = {
+                    "id": confirmation_id,
+                    "project_id": project_id,
+                    "diarizer_speaker_id": item.diarizer_speaker_id,
+                    "speaker_id": item.speaker_id,
+                    "camera_id": item.camera_id,
+                    "status": "confirmed",
+                    "provenance": "confirmed_mapping",
+                    "operator_id": str(operator),
+                    "confirmed_at": now,
+                    "source_run_id": current_version,
+                    "source_artifact_version": current_version,
+                    "evidence_turn_ids": item.evidence_turn_ids,
+                    "version": (current["version"] + 1 if current is not None else 1),
+                }
+                session.execute(speaker_confirmations.insert().values(**values))
+                response_rows.append({
+                    **values,
+                    "confirmed_at": now.isoformat(),
+                })
+            session.commit()
+        return {"artifact_version": current_version, "mappings": response_rows}
 
     @app.get("/projects/{project_id}/player-state")
     def get_player_state(project_id: str) -> dict:
@@ -3017,6 +3338,13 @@ def create_app(
                     ai_artifact.get("diarization_turns", []),
                     ai_artifact.get("speaker_turns", []),
                     confirmations,
+                    aligned_words=[
+                        word
+                        for segment in ai_artifact.get("segments", [])
+                        if isinstance(segment, Mapping)
+                        for word in segment.get("words", [])
+                        if isinstance(word, Mapping)
+                    ],
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 _emit_cut_event("candidate_failed", project_id=project_id,

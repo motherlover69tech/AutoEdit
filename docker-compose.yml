@@ -35,6 +35,9 @@ services:
       DB_NAME: autoedit
       DB_USER: autoedit
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deployment secrets}
+      # AUTOEDIT applies this as SET SESSION on every pooled MySQL connection;
+      # the shared central server is not modified globally.
+      DB_SORT_BUFFER_SIZE: ${DB_SORT_BUFFER_SIZE:-16777216}
 
       # Local AI services. Keep speech backends explicit/mock until the opt-in
       # WhisperX implementation passes every production acceptance gate.

@@ -22,6 +22,9 @@ DEVICE = os.getenv("WHISPERX_DEVICE", "cuda")
 ALLOWED_MODEL = os.getenv("WHISPER_MODEL", "large-v3")
 ALLOWED_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "float16")
 MAX_BATCH_SIZE = int(os.getenv("WHISPER_BATCH_SIZE", "4"))
+MAX_CONCURRENT_JOBS = int(os.getenv("WHISPERX_MAX_CONCURRENT_JOBS", "1"))
+if MAX_CONCURRENT_JOBS != 1:
+    raise RuntimeError("WHISPERX_MAX_CONCURRENT_JOBS must remain 1")
 ALLOWED_LANGUAGE = os.getenv("WHISPER_LANGUAGE", "en").strip() or None
 ALIGN_ENABLED = os.getenv("WHISPER_ALIGN", "true").strip().lower() in {
     "1",
