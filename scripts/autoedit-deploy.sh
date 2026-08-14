@@ -490,6 +490,18 @@ rm -f "$TARBALL" "$REMOTE_SCRIPT"
 RESULT_LINE=$(echo "$DEPLOY_OUTPUT" | grep '^RESULT:' | grep -v '=' | tail -1 || true)
 RESULT_VALUE="${RESULT_LINE#RESULT:}"
 
+# Safety booleans reflect the REMOTE reality, not local defaults: the remote
+# emits RESULT:mutation_started right before the build/recreate mutation, and
+# the terminal verdict tells us whether the candidate is live. Without this,
+# every wrapper JSON would claim "mutation_started": false even after a real
+# rebuild+recreate, which misleads adjudication.
+if echo "$DEPLOY_OUTPUT" | grep -q '^RESULT:mutation_started$'; then
+  MUTATION_STARTED=true
+fi
+if [[ "$RESULT_VALUE" == deployed_and_verified* ]]; then
+  CANDIDATE_LIVE=true
+fi
+
 # Also check exit code from ssh_tower
 echo ""
 echo "=== Deploy result: ${RESULT_VALUE:-unknown} (remote rc=${REMOTE_RC:-?}) ==="
