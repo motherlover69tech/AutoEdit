@@ -102,8 +102,8 @@ Verified in live config and session state:
 
 ## Exact next actions
 
-1. Let exact-directory Designer compliance card `t_0a292cd1` finish against `7bcd124`; do not duplicate or interrupt it while heartbeat/log/session activity remains fresh.
-2. If it returns bounded findings, create one Programmer correction card scoped exactly to those findings, then one round-2 compliance re-review.
+1. Let exact-directory Designer compliance card `t_0a292cd1` close cleanly with its seven bounded findings.
+2. Create one Programmer correction card scoped exactly to those seven findings, tests first, on the existing exact candidate worktree; then one round-2 exact-directory compliance re-review.
 3. Only after `DESIGN_COMPLIANCE_PASS`, create one independent Tester card with backend/API, real browser, actual vision, screenshots, console/network, responsive and privacy/invariance evidence. No Publisher/deploy card for this shadow slice.
 4. Real L0 remains separately blocked on one locked consent-cleared external fixture and exclusive V100 window; synthetic tests are never real-media acceptance.
 
@@ -120,4 +120,4 @@ Append timestamped entries below. Keep each entry terse: change, command/evidenc
 - 2026-08-15 gates: focused final 34 passed + Ruff/compile/diff PASS; post-schema invariance set 125 passed + Ruff/compile/diff PASS. WebUI full suite reached 927 passed / 5 environment skips / one ffmpeg-required environment failure. Exact `hermes-gateway` runtime (ffmpeg/ffprobe present) then passed the media requirement test and the full deterministic suite: **930 passed / 3 expected skips in 28.96s**.
 - Independent read-only review children timed out and are not approvals. Their useful pre-fix observations were converted into executable regressions above; Designer compliance remains mandatory.
 - 2026-08-15 candidate: the exact 15-file Tasks 1–5 boundary was committed as `7bcd124`; `git log -1` showed that SHA and `git status --short --branch` was clean.
-- 2026-08-15 board advance: six superseded Programmer experiments were audit-commented and archived. First compliance card `t_f58c3d36` was caught reviewing rematerialized HEAD `d9163ec` rather than candidate `7bcd124`; it was safely blocked/archived before verdict. Exact-directory replacement `t_0a292cd1` points to `/workspace/AUTOEDIT/.worktrees/t_b0c0bd87`, is assigned to `autoeditdesigner`, and reached Running as the board's only eligible card. Tester remains dependency-gated on `DESIGN_COMPLIANCE_PASS`.
+- 2026-08-15 board advance: six superseded Programmer experiments were audit-commented and archived. First compliance card `t_f58c3d36` was caught reviewing rematerialized HEAD `d9163ec` rather than candidate `7bcd124`; it was safely blocked/archived before verdict. Exact-directory replacement `t_0a292cd1` preflighted exact clean `7bcd124` and returned `IMPLEMENTATION_CHANGES_REQUIRED` with seven bounded findings: bind/derive the audio hypothesis; make frame-time evidence strictly representable; enforce selector/window/frame budgets in the real runner; close traversal/symlink/hard-link/TOCTOU gaps; revalidate every bound private input and bind comparison evidence before publication; evidence GPU exclusivity across inference intervals; and enforce all visual derivative/retention rights. Tester remains dependency-gated on `DESIGN_COMPLIANCE_PASS`.
