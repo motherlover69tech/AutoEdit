@@ -102,11 +102,12 @@ Verified in live config and session state:
 
 ## Exact next actions
 
-1. Monitor sole valid correction `t_4276a07b` with bounded status/heartbeat/file-count queries. It is running in exact directory `/workspace/AUTOEDIT/.worktrees/t_b0c0bd87` on `autoedit-qwen3.8:100k` / reasoning `low`; do not spawn a parallel correction.
-2. When it returns one clean correction commit, let dependency-gated exact-directory Designer round-2 card `t_d00ab884` run. Require `DESIGN_COMPLIANCE_PASS` before testing.
-3. Keep wrong-base duplicate `t_500689e0` blocked as `capability`; never unblock or auto-promote it. Its `cd38b87` worktree does not contain candidate `7bcd124`.
-4. Only after `DESIGN_COMPLIANCE_PASS`, create one independent Tester card with backend/API, real browser, actual vision, screenshots, console/network, responsive and privacy/invariance evidence. No Publisher/deploy card for this shadow slice.
-5. Real L0 remains separately blocked on one locked consent-cleared external fixture and exclusive V100 window; synthetic tests are never real-media acceptance.
+1. Monitor one-finding exact-directory correction `t_0ef4e0e1` with bounded status/heartbeat/file-count queries. It owns Finding 1 only on `/workspace/AUTOEDIT/.worktrees/t_b0c0bd87`, `autoedit-qwen3.8:100k` / reasoning `low`.
+2. If it commits and passes focused verification, create Finding 2 as the next single sequential card on the resulting clean HEAD. Continue one finding at a time through Finding 7; never run parallel corrections against this directory.
+3. Aggregate seven-finding card `t_4276a07b` is retired/blocked after 23 tool calls and 12 API calls with zero writes. Wrong-base duplicates `t_500689e0` and `t_dacd7812` remain blocked and must not be resumed.
+4. Existing Designer round-2 card `t_d00ab884` remains held until all seven sequential corrections are committed; update/recreate its dependency against the final correction card before allowing dispatch. Require `DESIGN_COMPLIANCE_PASS` before testing.
+5. Only after `DESIGN_COMPLIANCE_PASS`, create one independent Tester card with backend/API, real browser, actual vision, screenshots, console/network, responsive and privacy/invariance evidence. No Publisher/deploy card for this shadow slice.
+6. Real L0 remains separately blocked on one locked consent-cleared external fixture and exclusive V100 window; synthetic tests are never real-media acceptance.
 
 ## Active continuation — Qwen documentation and board monitoring
 
