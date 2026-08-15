@@ -74,8 +74,8 @@ The files, diff, tests, and these five findings must be revalidated against the 
 
 Current route authority is:
 
-- Programmer: `custom:ollama / autoedit-qwen3.8:100k`, reasoning `low`.
-- Tester: `custom:ollama / autoedit-qwen3.8:100k`, reasoning `low`.
+- Programmer: `custom:ollama / autoedit-qwen3.8:100k`, reasoning `medium` for new sessions. Active Finding 1 run 483 was created earlier and remains snapshotted at `low` until exit.
+- Tester: `custom:ollama / autoedit-qwen3.8:100k`, reasoning `medium` for new sessions; first post-change session still requires runtime proof.
 - Publisher: `custom:ollama / autoedit-qwen3.8:64k`, reasoning `low`.
 - Designer unchanged on local `custom:9Router`.
 - Public OpenRouter forbidden across worker primary/fallback/auxiliary/delegation routes.
@@ -119,7 +119,7 @@ Verified in live config and session state:
 ### Documented Qwen3.8 policy for speaker-identification evidence
 
 1. **Capability, not acceptance:** Qwen3.8-27B is a native vision-language model for images/video and supports per-request thinking control. This establishes technical eligibility for the shadow experiment, not proven active-speaker accuracy on AUTOEDIT media.
-2. **Separate reasoning policies:** Kanban Programmer/Tester agents remain on Hermes reasoning `low`. The product visual assessor must explicitly send `think:false`; no Kanban reasoning level may leak into that request.
+2. **Separate reasoning policies:** future Kanban Programmer/Tester sessions use Hermes reasoning `medium` (raised from `low` after exclusive-access diagnosis); Publisher remains `low`. The product visual assessor must explicitly send `think:false`; no Kanban reasoning level may leak into that request. The first new Programmer and Tester sessions must prove `reasoning_config.effort=medium` before the migration is called live-verified.
 3. **Exact product request:** local `autoedit-qwen3.8:64k`; ordered base64 images; `stream:false`; strict JSON Schema in `format`; `temperature:0`; bounded output/retries; `keep_alive:0`.
 4. **Permitted role:** classify supplied source-bound frames as `speaking`, `listening`, `reaction`, `off_camera`, or `unknown`, and state support/contradiction relative to the supplied bound WhisperX/camera hypothesis.
 5. **Forbidden authority:** Qwen may not name or biometrically identify a person, establish/alter person-camera mappings, invent frame/turn/camera references, create timestamps, rewrite WhisperX boundaries, or select/change a cut. Operator-confirmed mappings remain identity authority.
@@ -145,6 +145,7 @@ Append timestamped entries below. Keep each entry terse: change, command/evidenc
 - 2026-08-15 board correction: detected two simultaneous Programmer cards. `t_500689e0` was a Designer-created wrong-base worktree at `cd38b87` where `7bcd124` was not an ancestor. An initial dependency block auto-promoted because its parent was already done; corrected to non-promoting `capability` block. Runs 480/481 ended blocked, PID cleared. Valid exact-directory correction `t_4276a07b` remains the sole active correction.
 - 2026-08-15 review gate: created dependency-gated exact-directory Designer round-2 card `t_d00ab884`, explicitly requiring Qwen speaker-evidence constraints and separation of Kanban `low` reasoning from product `think:false`.
 - 2026-08-15 execution root cause: blocked-card state had not terminated four Hermes worker processes (PIDs 11626, 15381, 19175, 21815), leaving five Programmer sessions contending for the single `autoedit-qwen3.8:100k` Ollama model. This caused 180–420 second no-output waits and zero writes even on a one-finding card. Terminated only those four orphan processes; preserved active Finding 1 PID 22262. With exclusive access, the active Qwen session produced its first response and two tool calls within 20 seconds.
+- 2026-08-15 reasoning increase: changed Programmer and Tester `agent.reasoning_effort` and `delegation.reasoning_effort` from `low` to `medium`; aligned both SOUL files and the `autoedit-agent-team` runbook. Publisher remains `low`; product Qwen visual inference remains `think:false`. Existing run 483 remains `low` because reasoning is snapshotted at session creation. Verify the first new Programmer and Tester sessions record `reasoning_config.effort=medium` before marking live-proven.
 - 2026-08-15 context: 100K plain load 9.67s; `/api/ps` 100000 / 20,879,276,768 bytes VRAM; `ollama ps` 100% GPU; `nvidia-smi` 21,168 MiB used / 11,327 MiB free. Alias `autoedit-qwen3.8:100k` created; 64K preserved.
 - 2026-08-15 reasoning: fresh 100K/medium exact-token Programmer probe produced no output after four minutes at 96% GPU and was terminated. Switched Programmer/Tester to explicit `low` based on template branch and prior execution behavior.
 - 2026-08-15 route proof: Programmer session `20260815_034100_9de14f` ran 100K/low and returned `PROGRAMMER_LOW_100K_OK` in 33s. Tester session `20260815_034136_517627` ran 100K/low, issued real `vision_analyze` on the AUTOEDIT player screenshot, and returned `TESTER_VISION_OK`.
