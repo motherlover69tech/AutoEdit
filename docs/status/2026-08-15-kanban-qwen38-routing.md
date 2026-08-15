@@ -6,11 +6,17 @@ Peter ended the Claude/Codex subscription-backed worker routes and authorized th
 
 | Profile | Provider | Model | Hermes context | Reasoning |
 | --- | --- | --- | ---: | --- |
-| `autoeditprogrammer` | `custom:ollama` | `autoedit-qwen3.8:64k` | 65,536 | `extra_high` |
-| `autoedittester` | `custom:ollama` | `autoedit-qwen3.8:64k` | 65,536 | `extra_high` |
+| `autoeditprogrammer` | `custom:ollama` | `autoedit-qwen3.8:64k` | 65,536 | `xhigh` |
+| `autoedittester` | `custom:ollama` | `autoedit-qwen3.8:64k` | 65,536 | `xhigh` |
 | `autoeditpublisher` | `custom:ollama` | `autoedit-qwen3.8:64k` | 65,536 | `medium` |
 
 `autoeditdesigner` is unchanged and remains on its separately authorized route.
+
+`xhigh` is the canonical Hermes value. The initial `extra_high` spelling was invalid and
+silently resolved to the default `medium`; the Programmer and Tester profiles and this
+record were corrected after that was observed in a live Qwen3.8 worker log. A worker
+already running before the correction keeps its startup reasoning configuration; the
+next fresh Programmer/Tester run must report non-null `xhigh` reasoning configuration.
 
 Public OpenRouter remains forbidden for every AUTOEDIT worker surface. The three changed profiles have no fallback providers. Their main, auxiliary, and dormant delegation routes are aligned to the same local Qwen alias so context compression or future delegation cannot silently return to Codex/9Router/cloud billing.
 
