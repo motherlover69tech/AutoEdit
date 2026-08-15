@@ -107,11 +107,41 @@ Verified in live config and session state:
 3. Only after `DESIGN_COMPLIANCE_PASS`, create one independent Tester card with backend/API, real browser, actual vision, screenshots, console/network, responsive and privacy/invariance evidence. No Publisher/deploy card for this shadow slice.
 4. Real L0 remains separately blocked on one locked consent-cleared external fixture and exclusive V100 window; synthetic tests are never real-media acceptance.
 
+## Active continuation — Qwen documentation and board monitoring
+
+- Scope: recover the live correction/review chain, research authoritative Qwen3.8/Ollama guidance for visual speaker-identification evidence, record the resulting constraints here, and reflect the research/verification work on the Kanban board.
+- Context-control rule: query only bounded task/session columns and short log tails; never ingest full worker transcripts or unbounded test output into the coordinator context.
+- Recovered checkpoint: exact implementation candidate remains clean at `7bcd124`; main contains the committed seven-finding handoff; the last observed correction run was task `t_4276a07b` on `autoedit-qwen3.8:100k` with Hermes reasoning `low`.
+- Research completed against the official Qwen3.8-27B model card, official Ollama capability/API docs, and the installed aliases' live `/api/show` response.
+
+### Documented Qwen3.8 policy for speaker-identification evidence
+
+1. **Capability, not acceptance:** Qwen3.8-27B is a native vision-language model for images/video and supports per-request thinking control. This establishes technical eligibility for the shadow experiment, not proven active-speaker accuracy on AUTOEDIT media.
+2. **Separate reasoning policies:** Kanban Programmer/Tester agents remain on Hermes reasoning `low`. The product visual assessor must explicitly send `think:false`; no Kanban reasoning level may leak into that request.
+3. **Exact product request:** local `autoedit-qwen3.8:64k`; ordered base64 images; `stream:false`; strict JSON Schema in `format`; `temperature:0`; bounded output/retries; `keep_alive:0`.
+4. **Permitted role:** classify supplied source-bound frames as `speaking`, `listening`, `reaction`, `off_camera`, or `unknown`, and state support/contradiction relative to the supplied bound WhisperX/camera hypothesis.
+5. **Forbidden authority:** Qwen may not name or biometrically identify a person, establish/alter person-camera mappings, invent frame/turn/camera references, create timestamps, rewrite WhisperX boundaries, or select/change a cut. Operator-confirmed mappings remain identity authority.
+6. **Fail closed:** missing, duplicated, reordered, invented, malformed, or thinking-bearing output is an explicit shadow-analysis failure; never an empty success.
+7. **Promotion evidence:** only consent-controlled human-vs-WhisperX-vs-Qwen metrics can show usefulness. Model documentation and synthetic tests cannot pass real L0.
+
+Sources checked:
+
+- Qwen model card: `https://huggingface.co/Qwen/Qwen3.8-27B`
+- Ollama thinking: `https://docs.ollama.com/capabilities/thinking`
+- Ollama vision: `https://docs.ollama.com/capabilities/vision`
+- Ollama structured outputs: `https://docs.ollama.com/capabilities/structured-outputs`
+- Ollama chat API: `https://docs.ollama.com/api/chat`
+- Live `/api/show`: base and `64k`/`100k` aliases advertise `vision`, `thinking`, `tools`, and 262,144 native context; aliases pin 65,536 and 100,000 context respectively.
+- Installed template: thinking defaults to `xhigh`; accepts `xhigh|medium|low`; maps `high` to `xhigh`; `enable_thinking=false` bypasses reasoning instructions.
+
 ## Evidence log
 
 Append timestamped entries below. Keep each entry terse: change, command/evidence, result, exact next gate.
 
-- 2026-08-15 pickup: board/profile/worktree reconstructed; no worker running; implementation worktree contains uncommitted Tasks 1–5 code; Tester skill/vision policy gaps identified.
+- 2026-08-15 continuation pickup: recovered prior session `Advance Qwen 3.8 kanban integration`; switched monitoring to bounded SQLite/task fields after repeated context overflow; candidate still clean at `7bcd124`.
+- 2026-08-15 docs/runtime: official Qwen card confirms native image/video understanding, controllable thinking, and 262,144 native context. Official Ollama docs confirm `images`, `think`, JSON Schema `format`, deterministic `temperature:0`, and `keep_alive`. Live `/api/show` confirms the installed Q4 parent and both aliases advertise vision.
+- 2026-08-15 board correction: detected two simultaneous Programmer cards. `t_500689e0` was a Designer-created wrong-base worktree at `cd38b87` where `7bcd124` was not an ancestor; blocked as a superseded dependency duplicate and its run 480 ended blocked. Valid exact-directory correction `t_4276a07b` remains the sole active correction.
+- 2026-08-15 review gate: created dependency-gated exact-directory Designer round-2 card `t_d00ab884`, explicitly requiring Qwen speaker-evidence constraints and separation of Kanban `low` reasoning from product `think:false`.
 - 2026-08-15 context: 100K plain load 9.67s; `/api/ps` 100000 / 20,879,276,768 bytes VRAM; `ollama ps` 100% GPU; `nvidia-smi` 21,168 MiB used / 11,327 MiB free. Alias `autoedit-qwen3.8:100k` created; 64K preserved.
 - 2026-08-15 reasoning: fresh 100K/medium exact-token Programmer probe produced no output after four minutes at 96% GPU and was terminated. Switched Programmer/Tester to explicit `low` based on template branch and prior execution behavior.
 - 2026-08-15 route proof: Programmer session `20260815_034100_9de14f` ran 100K/low and returned `PROGRAMMER_LOW_100K_OK` in 33s. Tester session `20260815_034136_517627` ran 100K/low, issued real `vision_analyze` on the AUTOEDIT player screenshot, and returned `TESTER_VISION_OK`.
