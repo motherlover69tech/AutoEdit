@@ -102,10 +102,11 @@ Verified in live config and session state:
 
 ## Exact next actions
 
-1. Let exact-directory Designer compliance card `t_0a292cd1` close cleanly with its seven bounded findings.
-2. Create one Programmer correction card scoped exactly to those seven findings, tests first, on the existing exact candidate worktree; then one round-2 exact-directory compliance re-review.
-3. Only after `DESIGN_COMPLIANCE_PASS`, create one independent Tester card with backend/API, real browser, actual vision, screenshots, console/network, responsive and privacy/invariance evidence. No Publisher/deploy card for this shadow slice.
-4. Real L0 remains separately blocked on one locked consent-cleared external fixture and exclusive V100 window; synthetic tests are never real-media acceptance.
+1. Monitor sole valid correction `t_4276a07b` with bounded status/heartbeat/file-count queries. It is running in exact directory `/workspace/AUTOEDIT/.worktrees/t_b0c0bd87` on `autoedit-qwen3.8:100k` / reasoning `low`; do not spawn a parallel correction.
+2. When it returns one clean correction commit, let dependency-gated exact-directory Designer round-2 card `t_d00ab884` run. Require `DESIGN_COMPLIANCE_PASS` before testing.
+3. Keep wrong-base duplicate `t_500689e0` blocked as `capability`; never unblock or auto-promote it. Its `cd38b87` worktree does not contain candidate `7bcd124`.
+4. Only after `DESIGN_COMPLIANCE_PASS`, create one independent Tester card with backend/API, real browser, actual vision, screenshots, console/network, responsive and privacy/invariance evidence. No Publisher/deploy card for this shadow slice.
+5. Real L0 remains separately blocked on one locked consent-cleared external fixture and exclusive V100 window; synthetic tests are never real-media acceptance.
 
 ## Active continuation — Qwen documentation and board monitoring
 
