@@ -8,6 +8,8 @@
 
 **Tech Stack:** Existing Python 3.12/FastAPI/SQLAlchemy/MySQL/pytest application; NVIDIA Container Toolkit + CUDA/PyTorch/CTranslate2; WhisperX (faster-whisper ASR + word alignment + pyannote diarization); **DeepSeek V4 Flash** as the planned external semantic primary with local Ollama **Qwen3.5 9B Q4_K_M** fallback; ffmpeg; existing NPM/MySQL/VAAPI app deployment.
 
+**Companion plan:** `docs/plans/audiovisual-speaker-evidence-plan.md` defines the staged Qwen3.8 visual-evidence and specialist active-speaker experiment. It is shadow-only initially and does not supersede WhisperX timing, automatic audio sync, confirmed identity mappings, or the safe-wide policy.
+
 ---
 
 ## Documentation review / current state
