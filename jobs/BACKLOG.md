@@ -4,6 +4,18 @@ Statuses: `pending`, `in_progress`, `blocked`, `done`.
 
 Do not mark a stage `done` unless its Definition of Done from `docs/source/multicam_autoedit_spec.md` has passed.
 
+## Card granularity rule — mandatory (added 2026-08-16)
+
+The Qwen3.8-27b Programmer workers stall when a single card combines tests + implementation in one pass: they hit the 120-turn budget, the ~100k context ceiling, or the ~40 min time limit before committing (verified repeatedly: Stage 8.3 ×5, GATE-3 ×1, AV-L0 ×1, Stage 9.2 ×1).
+
+**Every correction/implementation card MUST be one of — never both:**
+- **RED slice** — write ONE failing regression test module (tests for a single rule), commit it, report RED + SHA. No implementation.
+- **GREEN slice** — implement ONLY the minimal code to make a specific committed RED test pass (one function/rule). Report GREEN + SHA.
+
+**Sizing test:** if a card body lists more than one numbered step, or touches more than ~2 files / ~1 test module, split it into one card per step. Target: each card finishes in ~30-50 turns and <70k context — well under the 75% compression threshold and the 100k ceiling.
+
+The 15-min auto-slicer cron (`dbbec1c817a0`) will slice any card that violates this and stalls. Write cards at this size the first time to avoid the churn.
+
 ## Current next job
 
 **Current pipeline state — 2026-08-14 (post-POSTGAP deploy):** **STAGE 7.4 CLOSED. AI-GPU-1 GATE-1/2/4 PASS; GATE-3 = POSTGAP fix DEPLOYED + candidate REGENERATED + SELECTED (v5) — Peter's editorial re-review is the only open acceptance item.** The W1–W6 direct redesign (`97149bc`) was deployed live 2026-08-14 via `scripts/autoedit-deploy.sh` (image `sha256:44938d4e…`, restarts 0, backends `mock|mock`, rollback tag + DB dump + config archive under `release-backups/publisher-97149bc-20260814T090825Z/`); the 54 superseded round-3..7 kanban cards were archived with audit comments (board now 0 blocked/todo/ready); GATE-3 candidate `01KZZRRT8SY5XY5TVN66XF6Z1Y` was regenerated from the accepted artifact `live-20260814T004600Z` with the exact current params and selected as version 5 — the five previously-mislabeled post-gap boundaries (49762/92135/205467/212318/316690) now fail safe to `low_confidence:wide` while confirmed-solo/overlap resolution is intact (268 clips). W6.1 is live (per-connection `SET SESSION sort_buffer_size` + `ix_cuts_project_created_id` index; compose env passthrough applied). Exact evidence and remaining work: `docs/status/2026-08-14-postgap-deploy-session.md` + `docs/status/2026-08-14-next-stage-work.md`.
@@ -14,8 +26,8 @@ Do not mark a stage `done` unless its Definition of Done from `docs/source/multi
 
 - **AI-GPU-1 four-gate acceptance spec:** `DESIGN_APPROVED`, committed to master (`d978f05`, `docs/plans/ai-gpu-1-acceptance-gates.md`). GATE-1..4 are defined: frame-level word timing, confirmed speaker identity, speaker-turn cut acceptance, VRAM/Ollama/Dots coexistence.
 - **Superseded Kanban history:** the round-3/4/5/6 and D2 cards were archived 2026-08-14 (54 cards, audit comments, via gateway CLI) — audit records only, none current work. Stage 7.4 is closed; GATE-1/2/4 PASS; the only open acceptance item in this release flow is **Peter's GATE-3 re-review of candidate v5** (POSTGAP fix deployed + regenerated + selected). A future automated GATE-4 collector is separate operational follow-up, not a blocker to the existing manual GATE-4 PASS.
-- **Kanban worker route (current, 2026-08-15):** Programmer and Tester use local `custom:ollama / autoedit-qwen3.8:100k` at explicit `low`; the active 100,000-token load was proved 100% GPU with 11,327 MiB free while Dots was disabled. Programmer returned the route marker in 33s. Tester has browser, computer-use, vision, the skills toolset, focused QA/AUTOEDIT runbooks, and made a real `vision_analyze` call before `TESTER_VISION_OK`. Publisher remains on `autoedit-qwen3.8:64k`/`low`. Main/auxiliary/delegation pins are role-aligned and fallbacks are empty. Reassess 100K before Dots resumes. Designer is unchanged; see `docs/status/2026-08-15-kanban-qwen38-routing.md`.
-- **Next manual action:** **Peter: watch "sm test cab" in the player (cut v5, candidate `01KZZRRT8SY5XY5TVN66XF6Z1Y`) and sign the GATE-3 re-review** (post-gap regions 46387–51196 / 89146–93029 / 204432–213145 / 307877–317568 should read wide/hold, not wrong close-ups). After GATE-3 sign-off: separate rollout decision for `WHISPER_BACKEND=whisperx` / `DIARIZE_BACKEND=whisperx`; then Stage 8.3 OTIO fallback (optional) and Stage 9.2 LLM title generator per the stage backlog. A future trusted-host GATE-4 collector remains a separate, explicitly authorized operations item. Crons stay paused.
+- **Kanban worker route (current, 2026-08-15):** Programmer and Tester use local `custom:llamacpp / Qwen3.8-27b` at explicit `low`; the active live llama.cpp health, authenticated inference, and fresh worker sessions are required proof. Programmer returned the route marker in 33s. Tester has browser, computer-use, vision, the skills toolset, focused QA/AUTOEDIT runbooks, and made a real `vision_analyze` call before `TESTER_VISION_OK`. Publisher remains on `Qwen3.8-27b`/`low`. Main/auxiliary/delegation pins are role-aligned and fallbacks are empty. Reassess 100K before Dots resumes. Designer is unchanged; see `docs/status/2026-08-15-kanban-qwen38-routing.md`.
+- **Next manual action (parked; not queue-blocking):** **Peter: watch "sm test cab" in the player (cut v5, candidate `01KZZRRT8SY5XY5TVN66XF6Z1Y`) and sign the GATE-3 re-review** (post-gap regions 46387–51196 / 89146–93029 / 204432–213145 / 307877–317568 should read wide/hold, not wrong close-ups). After GATE-3 sign-off: separate rollout decision for `WHISPER_BACKEND=whisperx` / `DIARIZE_BACKEND=whisperx`. Stage 8.3 OTIO fallback, Stage 9.2 LLM title generation, and other dependency-safe offline lanes may proceed independently. A future trusted-host GATE-4 collector remains a separate, explicitly authorized operations item. The 30-minute coordinator watchdog is resumed under v7 `PETER_QUEUE v1` lane-parking policy; the three-hour progress dashboard remains paused.
 
 Shipped as of 2026-08-12 (integrated to `master` at `ac8407e`; deployed live, image `sha256:0d6228f7`): Phase 5 residuals P5-A/B/C, Phase 6 (speaker-mapping review UI, confirmed-turn projection fix, terminal source-coverage truncation), **plus** the 2026-08-12 live-session fixes — player tail handling (`743d801`), `whisperx_available` in player-state (`322cfe8`), regenerate sending all 8 cut params (`53f50bb`), and the save-cut `expected_version`/error-rendering fix (`ac8407e`). **Peter confirmed all working ("all confirmed working").** See `docs/status/2026-08-12-whisperx-live-session.md` and `docs/status/phase-6-terminal-truncation-release-2026-08-12.md`. Do not re-card any of it. Tester `t_281b2632` returned TEST_PASS on `1d5886a` (45 focused; 851 full / 3 expected skips).
 
@@ -32,6 +44,22 @@ Final deterministic local checkpoint on the integrated tree: run `OLLAMA_BASE_UR
 Deployment note: Publisher card `t_a461c537` records `DEPLOYED_AND_VERIFIED` for api.py at `1d5886a` (image `sha256:8133558f86f2e72adf17afebdc1476ee355cc5b9b5054a4103fd5b300a759477`, restarts 0, backends mock|mock, truncation live: candidate end 666,167 ms, `applied=true`, omitted tail 5,129 ms). Direct auto-cut defaults remain live (`min_shot_ms=250`, no lead/tail, overlap/silence→wide); existing cuts retain stored params until regenerated. **Selected cut is now the WhisperX candidate `01KZT3372CDNV7SBKK18STZR2Z` v2 (selected 2026-08-12 ~17:14 UTC per Peter request);** the VAD cut `01KXPJJDCFSM377W46WDS1CJZ3` is no longer selected (revert = `PUT` it with `expected_version: 2`).
 
 ## Detailed jobs
+
+### Job LLM-CLIENT-LLAMACPP — refactor `llm_client.py` from Ollama shim to direct llama.cpp (OpenAI API)
+
+- **Status:** pending / **HELD** — do not start until the current Stage 8.3/9.2 and AV-L0 compliance work drains (Peter, 2026-08-16).
+- **Goal:** stop routing the product LLM through the Ollama-compatible shim (`:11435`) and call llama.cpp's OpenAI-compatible API (`:8361/v1/chat/completions`) directly, so there is one LLM path.
+- **Why:** llama.cpp does not speak the Ollama protocol (`/api/chat`, `/api/generate`, `/api/tags`); `llm_client.py` does, so the shim currently translates. Dropping the translation layer removes a moving part. The shim itself stays (it also serves the Unsloth desktop client on `.118` via `:11434`).
+- **Scope:**
+  - Rewrite `src/autoedit/llm_client.py` chat/generate to OpenAI format: `POST /v1/chat/completions`; `temperature`/`max_tokens`; `response_format: {"type":"json_object"}` and `{"type":"json_schema","json_schema":{…}}` for JSON/JSON-schema; parse `choices[0].message.content`.
+  - `think: false` → `chat_template_kwargs: {"enable_thinking": false}` (verify against the live Qwen3.8 template).
+  - Health check `/api/tags` → `/v1/models`.
+  - Add llama.cpp `--api-key` to config/env (the `:8361` server is keyed).
+  - Port the shim's robustness into the client: fresh-seed retries (llama.cpp reuses one server seed → identical re-failures) and Qwen's bare-JSON / tool-call-500 handling.
+  - Fold `ai/qwen_visual.py` into the same client path (it already targets `:8361/v1` directly) so there is a single LLM client.
+  - Update `config.py`: replace the `OLLAMA_BASE_URL` default `:11435` with the llama.cpp endpoint `:8361` (or add a dedicated `LLM_BASE_URL`/`LLM_API_KEY`).
+- **Tests:** port any `llm_client`-gated tests to the OpenAI shape; deterministic mock paths unchanged. Full mock-isolated suite stays green (LLM calls are gated off when `OLLAMA_BASE_URL`/`LLM_MODEL` are empty).
+- **Do NOT:** touch production cut authority, confirmation semantics, or the AV-L0 shadow slice — infrastructure only.
 
 ### Job AI-GPU-1-CORRECTIVE — artifact review fixes and real inference acceptance
 

@@ -6,7 +6,7 @@
 
 **Architecture:** Preserve automatic audio synchronization and WhisperX word/diarization artifacts as the audio timeline. Add a shadow-mode visual evidence pipeline that extracts explicitly timestamped frames around ambiguous turns, obtains schema-constrained Qwen3.8 assessments, and stores them separately from authoritative activity. Benchmark that evidence first; if useful, add a specialist audio-visual active-speaker detector for timing and use Qwen only for identity assistance and ambiguous-window reasoning. A deterministic fusion policy may influence cuts only after real-media gates pass, and low-confidence/conflicting evidence always selects wide.
 
-**Tech Stack:** Existing FastAPI/SQLAlchemy/MySQL AUTOEDIT app; existing isolated WhisperX/V100 worker and versioned AI contracts; ffmpeg/PyAV frame extraction; local Ollama 0.31.2 with `hf.co/unsloth/Qwen3.8-27B-GGUF:Q4_K_M`; JSON Schema/Pydantic; optional TalkNet-compatible active-speaker detector after the shadow benchmark; pytest; existing player/CDL audit metadata.
+**Tech Stack:** Existing FastAPI/SQLAlchemy/MySQL AUTOEDIT app; existing isolated WhisperX/V100 worker and versioned AI contracts; ffmpeg/PyAV frame extraction; local llama.cpp serving `Qwen3.8-27b` (GGUF, `--n-gpu-layers 99`); JSON Schema/Pydantic; optional TalkNet-compatible active-speaker detector after the shadow benchmark; pytest; existing player/CDL audit metadata.
 
 ---
 
@@ -36,6 +36,35 @@
 | L5 | Eligible to become the default after repeated real-project acceptance | Yes, separate rollout decision |
 
 No level is implied by code completion alone; each requires its stated live/real-media gate.
+
+---
+
+## Target end-state identification engine (post-L0, forward-looking)
+
+> Recorded 2026-08-16 from Peter's GATE-3 review. **Not** part of the current shadow slice — this is the long-run architecture the L0 shadow evidence should eventually feed.
+
+**Why no single signal is sufficient:**
+- **VAD / energy** — unreliable on unequal mic levels, cross-mic bleed, and background noise.
+- **WhisperX diarization (pyannote)** — unreliable on similar voices and post-gap speaker continuation (the GATE-3 rejection: the presenter's "Right, Pete, why are we here?" was diarized as the interviewee after a gap).
+- **Qwen visual** — accurate but too expensive to run continuously across all three camera streams.
+
+**Target hierarchy (confidence-gated; Qwen runs only on disagreement):**
+1. VAD and WhisperX each emit a per-window speaker hypothesis **with a confidence score**.
+2. If they **agree** at high confidence → use it, no visual pass.
+3. If they **disagree** (e.g. VAD shows the presenter's mic loud while WhisperX says the interviewee is speaking — the exact GATE-3 signature) **or confidence is low** → tag the window `low_confidence` and route it to the **Qwen visual arbiter**.
+4. Qwen inspects the relevant camera feeds for the flagged window and makes the final decision (fail-closed to wide if it cannot resolve).
+
+This is a **three-signal fusion engine** — VAD + WhisperX (audio, always-on) + Qwen visual (on-demand, disagreement-only) — that supersedes mono-mix pyannote as the primary identifier.
+
+**Relation to this plan:**
+- Task 4 already builds the fail-closed Qwen visual assessor; Task 2 builds ambiguous-window selection. The missing first-class input is a **VAD-vs-WhisperX disagreement signal** (added to Task 2 triggers below).
+- Task 8's fusion ladder should promote Qwen from "identity assistance only" to "arbiter on disagreement" for this engine.
+- Per-channel diarization (stop mixing the two mics; diarize each channel independently) is a complementary structural fix to evaluate alongside.
+
+**Downstream mitigations already shipped (survive-it, not cure):**
+- `activity_from_turns.py` POSTGAP-R1/R2 (commit `97149bc`): boundary-crossing post-gap turns fail safe to `low_confidence:wide`.
+- Card `t_1f0a5bb6` (in flight): broaden that fail-safe to A→B→A continuation sandwiches (the five GATE-3 findings).
+- These only suppress a wrong close-up; they do **not** identify the correct speaker.
 
 ---
 
@@ -86,6 +115,7 @@ git diff --check
 **Initial triggers:**
 
 - post-gap turn with a word crossing the diarization onset;
+- VAD/energy active-speaker vs WhisperX diarization disagreement (presenter mic loud while diarization selects the other speaker);
 - WhisperX mapping unresolved or below configured confidence;
 - rapid speaker alternation below a configured interval;
 - overlapping diarization turns;
@@ -142,7 +172,7 @@ Manual fixture check must prove extracted frame timestamps correspond to the bro
 
 ### Task 4: Add a fail-closed Qwen3.8 visual assessor
 
-**Objective:** Submit ordered timestamped frames to local Ollama and validate assessments as supporting evidence only.
+**Objective:** Submit ordered timestamped frames to local llama.cpp and validate assessments as supporting evidence only.
 
 **Files:**
 - Create: `src/autoedit/ai/qwen_visual.py`
@@ -152,9 +182,9 @@ Manual fixture check must prove extracted frame timestamps correspond to the bro
 
 **Runtime policy:**
 
-- Model: `autoedit-qwen3.8:64k`, the server-side 65,536-context alias of `hf.co/unsloth/Qwen3.8-27B-GGUF:Q4_K_M`.
-- Endpoint: configured local Ollama URL; no public OpenRouter route.
-- `think=false`, `temperature=0`, strict JSON Schema, bounded output, bounded retries, `keep_alive=0`.
+- Model: `Qwen3.8-27b`, served by llama.cpp at `http://192.168.50.50:8361/v1`.
+- AUTOEDIT's `OLLAMA_BASE_URL` points at the Ollama-compatible shim at `http://192.168.50.50:11435` (a compat layer fronting llama.cpp); no public OpenRouter route.
+- `think=false`, `temperature=0`, strict JSON Schema, bounded output, and bounded retries. Do not claim `keep_alive=0` unloads llama.cpp; it remains resident while the container runs.
 - Submit explicitly ordered images with machine-generated camera/time metadata.
 - Qwen must echo provided frame IDs in its assessment. Missing, duplicated, invented, or reordered frame references fail validation.
 - The caller—not Qwen—owns frame count and timing. The live smoke showed that useful visual reasoning can coexist with an inaccurate self-reported frame count, so self-count is never trusted.
@@ -170,16 +200,16 @@ Manual fixture check must prove extracted frame timestamps correspond to the bro
 - thinking trace in non-thinking mode;
 - timeout/5xx/retry exhaustion;
 - GPU-busy queue behaviour;
-- `keep_alive=0` and local endpoint enforcement;
+- local model/endpoint enforcement and explicit GPU-window arbitration;
 - raw model text never becomes camera authority.
 
 **Verification:**
 
 ```bash
 env -u VIRTUAL_ENV uv run pytest tests/test_qwen_visual.py -q
-curl -fsS http://192.168.50.50:11434/api/show \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"autoedit-qwen3.8:64k"}'
+curl -fsS http://192.168.50.50:8361/health
+curl -fsS http://192.168.50.50:8361/v1/models
+curl -fsS http://192.168.50.50:11435/api/tags
 ```
 
 ---
@@ -365,7 +395,7 @@ Expected first deliverable:
 1. a strict shadow artifact contract;
 2. deterministic selection of known ambiguous windows;
 3. timestamped frame extraction;
-4. fail-closed Qwen3.8 assessment through local Ollama;
+4. fail-closed Qwen3.8 assessment through local llama.cpp;
 5. a redacted comparison report on the known problematic material.
 
 **Explicitly defer:** active-speaker service integration, cut fusion, UI cut selection, deployment, and default changes.
