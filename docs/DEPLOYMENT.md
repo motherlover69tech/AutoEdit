@@ -9,7 +9,11 @@ Browser
   → Nginx Proxy Manager TLS at https://ingest.peteflix.uk
   → AUTOEDIT app on http://192.168.50.50:8010 using host networking
   → Peter's central MySQL server at 192.168.50.50:3306
-  → Ollama at http://192.168.50.50:11434
+  → llama.cpp server at http://192.168.50.50:8361 (OpenAI-compatible API).
+    NOTE (2026-08-22): Ollama is fully retired from the stack. The app still
+    reaches it through the legacy compatibility shim at http://192.168.50.50:11435
+    (Ollama-wire translation only); replacing that with a DIRECT llama.cpp call
+    is the open `LLM-CLIENT-LLAMACPP` job in jobs/BACKLOG.md.
   → optional internal WhisperX GPU service on http://127.0.0.1:8011
   → media on /mnt/user/automulticam mounted as /data
 ```
@@ -56,7 +60,7 @@ export DB_PASSWORD='<from secret store>'
 # deployment unless intentionally changed.
 export OPERATOR_USERNAME=peter
 export OPERATOR_DISPLAY_NAME=Peter
-export LLM_MODEL=gemma4:12b-q4-68k
+export LLM_MODEL=Qwen3.8-27b
 export PROXY_ENCODER=h264_vaapi
 
 # Confirm what Compose will pass to the container before starting it.
@@ -76,7 +80,7 @@ Expected `docker compose config` shape:
   - `DB_PORT: "3306"`
   - `DB_NAME: autoedit`
   - `DB_USER: autoedit`
-  - `OLLAMA_BASE_URL: http://192.168.50.50:11434`
+  - `OLLAMA_BASE_URL: http://192.168.50.50:11435`
   - `UPLOAD_MAX_CHUNK_BYTES: 67108864`
   - `CUT_MIN_SHOT_MS: "250"`
 
@@ -97,8 +101,8 @@ Expected `docker compose config` shape:
 | `DB_NAME` | yes | `autoedit` | Application database. |
 | `DB_USER` | yes | `autoedit` | Application DB user. |
 | `DB_PASSWORD` | yes | secret store | Never commit. |
-| `OLLAMA_BASE_URL` | no | `http://192.168.50.50:11434` | Current code reads this name. Do not use `LLM_BASE_URL`. |
-| `LLM_MODEL` | no | `hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M` | Current Ollama-only client model and planned local fallback. DeepSeek-primary provider chaining is not implemented yet. |
+| `OLLAMA_BASE_URL` | no | `http://192.168.50.50:11435` | Legacy env name still read by deployed code; points at the llama.cpp shim (:11435), NOT Ollama (retired 2026-08). New code should use `LLM_BASE_URL`. |
+| `LLM_MODEL` | no | `Qwen3.8-27b` | Local llama.cpp Qwen model served via the :11435 compatibility shim until the direct-call migration (`LLM-CLIENT-LLAMACPP`) ships. DeepSeek-primary provider chaining is not implemented yet. |
 | `WHISPER_BACKEND` | no | `mock` | Use `whisperx` only after the opt-in GPU service passes the live gates below. Unknown/unavailable backends fail explicitly. |
 | `WHISPER_MODEL` | no | `large-v3` | WhisperX ASR model name. |
 | `WHISPERX_BASE_URL` | no | `http://127.0.0.1:8011` | Internal service URL; do not expose through NPM. |
@@ -150,8 +154,8 @@ Compose-managed acceptance run):
    `POST http://127.0.0.1:8011/v1/transcribe`; verify non-empty aligned words.
 3. Check three audible word boundaries against AUTOEDIT's player/master timeline;
    each must be within one project frame after the stored channel sync offset.
-4. Measure peak VRAM with Dots TTS resident and Ollama unloaded. Start with batch
-   size 4; do not raise it without headroom.
+4. Measure peak VRAM with Dots TTS resident and the local LLM server (llama.cpp
+   :8361) unloaded. Start with batch size 4; do not raise it without headroom.
 5. Only then set `WHISPER_BACKEND=whisperx` in deployment secrets and recreate the
    app service. A service failure then returns a visible 502 and marks processing
    errored; it never emits mock transcript text.
@@ -236,13 +240,13 @@ Do not advertise these as production-complete until implemented and verified:
 
 - Real WhisperX transcription now has an opt-in service/client path, but production remains `WHISPER_BACKEND=mock` until the V100 image, real-WAV timing, and VRAM gates pass.
 - Diarization currently uses `mock_diarize()` / explicit channel mapping; WhisperX diarization is intentionally not enabled for isolated speaker WAVs.
-- Topic segmentation can use Ollama but still has mock fallback behavior.
+- Topic segmentation can use the local LLM (llama.cpp :8361 via the :11435 shim; Ollama retired 2026-08) but still has mock fallback behavior.
 - YouTube title generation is deterministic/template-based.
 - Pipeline processing is an in-process background thread, not Redis/worker infrastructure.
 - Hardware proxy encoding currently uses VAAPI (`h264_vaapi`). QSV should be called deployed only after a real container encode verifies `h264_qsv`.
 - Audio sync now fails on low-confidence matches instead of silently using zero offset.
 
-## Automated deployment via `autoedit-deploy.sh` (Kanban Publisher)
+## Automated deployment via `autoedit-deploy.sh` (Publisher role)
 
 The canonical mechanism for the Publisher agent to deploy to live Unraid is the
 deterministic script at `scripts/autoedit-deploy.sh`. It replaces ad-hoc inline
